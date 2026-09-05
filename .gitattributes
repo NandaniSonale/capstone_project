@@ -1,3 +1,7 @@
 version https://git-lfs.github.com/spec/v1
 oid sha256:14d248c4f8754ee49f76508ea51ff99e5c780d8f700ff15f96e6a37d3ff1399f
 size 176
+*.mp4 filter=lfs diff=lfs merge=lfs -text
+*.avi filter=lfs diff=lfs merge=lfs -text
+*.mov filter=lfs diff=lfs merge=lfs -text
+*.mkv filter=lfs diff=lfs merge=lfs -text
