@@ -57,3 +57,6 @@ ffmpeg_sources/
 # ----------------------------
 tracking_outputs/
 temp_types.txt
+test_batch_output/
+archive/
+output/*/

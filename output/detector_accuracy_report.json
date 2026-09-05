@@ -1,0 +1,27 @@
+{
+  "total_videos_evaluated": 171,
+  "total_frames_evaluated": 51365,
+  "metrics": {
+    "mean_iou_overall": 0.8159,
+    "mean_iou_i_frames": 0.9855,
+    "mean_iou_p_frames": 0.8061,
+    "mean_iou_b_frames": 0.8114,
+    "mean_iou_detection_anchor": 0.9855,
+    "mean_iou_bafe_propagation": 0.8098,
+    "mAP_50": 0.9848,
+    "mAP_75": 0.7192,
+    "mAP_50_95": 0.6883,
+    "precision_at_50": 0.9848,
+    "recall_at_50": 0.9873,
+    "f1_score_at_50": 0.986,
+    "precision_at_75": 0.7192,
+    "recall_at_75": 0.721,
+    "f1_score_at_75": 0.7201
+  },
+  "frame_counts": {
+    "total": 51365,
+    "i_frames": 1809,
+    "p_frames": 15384,
+    "b_frames": 34172
+  }
+}
