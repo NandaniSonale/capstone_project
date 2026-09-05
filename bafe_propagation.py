@@ -17,9 +17,12 @@ def mb_to_grid(mb_x, mb_y, num_mb_x, num_mb_y, grid_size):
 
 
 def mv_to_grid_delta(dx, dy, frame_width, frame_height, grid_size):
-    """Convert H.264 quarter-pixel MVs to grid-space displacement."""
-    grid_dx = (dx / 4.0) * grid_size / frame_width
-    grid_dy = (dy / 4.0) * grid_size / frame_height
+    """Convert H.264 quarter-pixel MVs to grid-space displacement.
+    H.264 motion vectors point backwards to the reference frame block (X_ref - X_curr),
+    so object forward motion direction is (-dx, -dy).
+    """
+    grid_dx = -(dx / 4.0) * grid_size / frame_width
+    grid_dy = -(dy / 4.0) * grid_size / frame_height
     return grid_dx, grid_dy
 
 

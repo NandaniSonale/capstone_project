@@ -65,7 +65,10 @@ class CompressedDomainTracker:
         )
 
         if os.path.exists(self.cache_dir):
-            shutil.rmtree(self.cache_dir)
+            try:
+                shutil.rmtree(self.cache_dir, ignore_errors=True)
+            except Exception:
+                pass
 
         os.makedirs(self.cache_dir, exist_ok=True)
 
@@ -259,7 +262,11 @@ class CompressedDomainTracker:
                     freq_map
                 )
 
-            os.remove(i_bin)
+            if os.path.exists(i_bin):
+                try:
+                    os.remove(i_bin)
+                except OSError:
+                    pass
 
         # =====================================================
         # PROCESS P-FRAME MOTION VECTORS + DCT ENERGY
@@ -295,7 +302,11 @@ class CompressedDomainTracker:
                         "dct_energy": float(energy)
                     })
 
-            os.remove(p_bin)
+            if os.path.exists(p_bin):
+                try:
+                    os.remove(p_bin)
+                except OSError:
+                    pass
 
     def process_frame(self, frame, csv_writer):
 
@@ -340,46 +351,67 @@ class CompressedDomainTracker:
                     )[0]
 
                     self.active_boxes = []
+                    best_box = None
+                    best_conf = 0.0
 
                     for i in range(self.grid_size):
 
                         for j in range(self.grid_size):
 
-                            if preds[i, j, 0] >= self.conf_threshold:
+                            conf = float(preds[i, j, 0])
+                            box = preds[i, j, :].tolist()
 
-                                box = preds[i, j, :].tolist()
+                            box[1] += j
+                            box[2] += i
 
-                                box[1] += j
-                                box[2] += i
+                            if box[3] <= 1.0:
+                                box[3] *= self.grid_size
 
-                                if box[3] <= 1.0:
-                                    box[3] *= self.grid_size
+                            if box[4] <= 1.0:
+                                box[4] *= self.grid_size
 
-                                if box[4] <= 1.0:
-                                    box[4] *= self.grid_size
-
+                            if conf >= self.conf_threshold:
                                 self.active_boxes.append(box)
+                            elif conf > best_conf:
+                                best_conf = conf
+                                best_box = box
 
-                    source = "DET"
+                    fallback_threshold = max(0.25, self.conf_threshold * 0.5)
+                    if not self.active_boxes and best_box is not None and best_conf >= fallback_threshold:
+                        self.active_boxes = [best_box]
+                        print(
+                            f"[PTS {pts}] "
+                            f"I-Frame: fallback detection "
+                            f"(conf={best_conf:.3f})."
+                        )
 
-                    print(
-                        f"[PTS {pts}] "
-                        f"I-Frame: Detected "
-                        f"{len(self.active_boxes)} boxes."
-                    )
+                    if self.active_boxes:
+                        source = "DET"
+                        print(
+                            f"[PTS {pts}] "
+                            f"I-Frame: Detected "
+                            f"{len(self.active_boxes)} boxes."
+                        )
+                    else:
+                        print(
+                            f"[PTS {pts}] "
+                            f"I-Frame: No detection "
+                            f"(best conf={best_conf:.3f})."
+                        )
 
         # =====================================================
         # P-FRAME: BAFE PROPAGATION THEN ROI EXTRACTION
         # =====================================================
 
-        elif f_type == 'P':
+        elif f_type in ('P', 'B'):
 
             roi_mbs = []
 
-            if len(self.active_boxes) > 0:
+            if len(self.active_boxes) > 0 and f_type == 'B':
                 source = "PROP"
 
             if pts in self.p_frame_data and len(self.active_boxes) > 0:
+                source = "PROP"
 
                 mbs = self.p_frame_data[pts]
                 num_mb_x = max(frame.width // 16, 1)
@@ -409,8 +441,15 @@ class CompressedDomainTracker:
 
                 print(
                     f"[PTS {pts}] "
-                    f"P-Frame: BAFE propagated, "
+                    f"{f_type}-Frame: BAFE propagated, "
                     f"extracted {len(roi_mbs)} ROI macroblocks."
+                )
+
+            elif len(self.active_boxes) > 0 and f_type == 'B':
+                # B-frames have no compressed-domain MV bin; carry forward last box.
+                print(
+                    f"[PTS {pts}] "
+                    f"B-Frame: carried forward propagated bbox."
                 )
 
         # =====================================================
@@ -494,6 +533,12 @@ class CompressedDomainTracker:
             "roi_motion_data.json"
         )
 
+        if os.path.exists(roi_json):
+            try:
+                os.remove(roi_json)
+            except OSError:
+                pass
+
         with open(roi_json, 'w') as f:
             json.dump(
                 self.temporal_roi_data,
@@ -506,6 +551,8 @@ class CompressedDomainTracker:
             f"{roi_json}"
         )
 
+        return self.temporal_roi_data
+
 
 if __name__ == '__main__':
 
@@ -514,7 +561,7 @@ if __name__ == '__main__':
     parser.add_argument(
         '--video',
         '-v',
-        default=r"Human Activity Recognition - Video Dataset\Clapping\Clapping (1).mp4",
+        default=r"C:\Users\newuser\capstone_project\Human Activity Recognition - Video Dataset\Walking\Walking (23).mp4",
         help="Input video path"
     )
 

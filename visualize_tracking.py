@@ -29,6 +29,16 @@ def visualize(video_path, csv_path, grid_size=7):
     output_dir = os.path.join(os.path.dirname(video_path), "visualization_frames")
     os.makedirs(output_dir, exist_ok=True)
 
+    # Prepare video writer for MP4 video output
+    stream = container.streams.video[0]
+    w_img, h_img = stream.width, stream.height
+    fps = float(stream.average_rate) if stream.average_rate else 30.0
+    
+    output_mp4 = r"visuals\tracking_visualization.mp4"
+    os.makedirs(os.path.dirname(output_mp4), exist_ok=True)
+    fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+    writer = cv2.VideoWriter(output_mp4, fourcc, fps, (w_img, h_img))
+
     print("Starting visualization loop...")
     for frame in container.decode(video=0):
         pts = frame.pts
@@ -41,7 +51,6 @@ def visualize(video_path, csv_path, grid_size=7):
         
         # Get pixels (this works because we use a standard av container)
         img = frame.to_ndarray(format='bgr24')
-        h_img, w_img = img.shape[:2]
 
         if pts in boxes_by_pts.groups:
             frame_boxes = boxes_by_pts.get_group(pts)
@@ -51,8 +60,8 @@ def visualize(video_path, csv_path, grid_size=7):
                 # cx/cy are in range [0, grid_size]
                 cx_rel = row['cx'] / grid_size
                 cy_rel = row['cy'] / grid_size
-                w_rel = row['w']
-                h_rel = row['h']
+                w_rel = row['w'] / grid_size
+                h_rel = row['h'] / grid_size
 
                 # Absolute pixel locations
                 xmin = int((cx_rel - w_rel/2) * w_img)
@@ -73,18 +82,18 @@ def visualize(video_path, csv_path, grid_size=7):
         cv2.putText(img, f"Frame: {pts} Type: {f_type}", (20, 40), 
                     cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 255), 2)
 
-        # Save or display
-        # We save every 5th frame to avoid clogging the disk, or you can save all
+        # Save image frame and write to MP4 video
         save_path = os.path.join(output_dir, f"render_{pts:06d}.jpg")
         cv2.imwrite(save_path, img)
-        
-        # Optional: Show window (comment out if running on server)
-        cv2.imshow("Tracking Visualizer", img)
-        if cv2.waitKey(1) & 0xFF == ord('q'):
-            break
+        if writer.isOpened():
+            writer.write(img)
+
+    if writer:
+        writer.release()
 
     cv2.destroyAllWindows()
     print(f"\nDone. Visualization frames saved in: {output_dir}")
+    print(f"Visualization video output saved in: {output_mp4}")
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
