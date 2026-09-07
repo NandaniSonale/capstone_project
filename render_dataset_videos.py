@@ -94,9 +94,11 @@ def render_single_video(
             raw_cap = None
 
     t0 = time.time()
-    total_frames = len(df)
-    scale_x = width / 1080.0
-    scale_y = height / 1920.0
+    # A CSV row is a box, not necessarily a video frame. Grouping by PTS keeps
+    # the raw decoder and the tracking data on the same frame when there are
+    # multiple detections.
+    frame_groups = list(df.groupby('pts', sort=False))
+    total_frames = len(frame_groups)
 
     fourcc = cv2.VideoWriter_fourcc(*'mp4v')
     writer = cv2.VideoWriter(output_video_path, fourcc, fps, (width, height))
@@ -106,12 +108,9 @@ def render_single_video(
 
     grid_w = max(int(16 * scale_x), 4)
 
-    for idx in range(total_frames):
-        row = df.iloc[idx]
-        pts = int(row['pts'])
-        f_type = str(row['frame_type'])
-        source = str(row['source'])
-        conf = float(row['confidence'])
+    for idx, (pts_value, frame_rows) in enumerate(frame_groups):
+        pts = int(pts_value)
+        f_type = str(frame_rows.iloc[0]['frame_type'])
         mbs = motion_data.get(f"frame_{pts}", [])
 
         # 1. Base Frame
@@ -119,8 +118,10 @@ def render_single_video(
             ret, frame = raw_cap.read()
             if ret and frame is not None:
                 canvas = cv2.resize(frame, (width, height))
+                source_height, source_width = frame.shape[:2]
             else:
                 canvas = np.full((height, width, 3), (16, 20, 26), dtype=np.uint8)
+                source_width, source_height = width, height
         else:
             # Compressed domain grid canvas
             canvas = np.full((height, width, 3), (16, 20, 26), dtype=np.uint8)
@@ -129,31 +130,37 @@ def render_single_video(
                 cv2.line(canvas, (gx, 0), (gx, height), (24, 30, 38), 1)
             for gy in range(0, height, grid_w * 4):
                 cv2.line(canvas, (0, gy), (width, gy), (24, 30, 38), 1)
+            source_width, source_height = width, height
 
-        # 2. Coordinates calculation (grid [0, 7] -> pixel)
-        cx_rel = float(row['cx']) / 7.0
-        cy_rel = float(row['cy']) / 7.0
-        w_rel = float(row['w']) / 7.0
-        h_rel = float(row['h']) / 7.0
+        # 2. Coordinates calculation (grid [0, 7] -> output pixels)
+        boxes = []
+        for _, row in frame_rows.iterrows():
+            source = str(row['source'])
+            conf = float(row['confidence'])
+            cx_rel = float(row['cx']) / 7.0
+            cy_rel = float(row['cy']) / 7.0
+            w_rel = float(row['w']) / 7.0
+            h_rel = float(row['h']) / 7.0
 
-        xmin = int((cx_rel - w_rel / 2.0) * width)
-        ymin = int((cy_rel - h_rel / 2.0) * height)
-        xmax = int((cx_rel + w_rel / 2.0) * width)
-        ymax = int((cy_rel + h_rel / 2.0) * height)
+            xmin = int((cx_rel - w_rel / 2.0) * width)
+            ymin = int((cy_rel - h_rel / 2.0) * height)
+            xmax = int((cx_rel + w_rel / 2.0) * width)
+            ymax = int((cy_rel + h_rel / 2.0) * height)
+            boxes.append((source, conf, xmin, ymin, xmax, ymax))
 
-        # 3. Soft ROI glow
-        if source != 'NONE' and (xmax > xmin and ymax > ymin):
-            overlay = canvas.copy()
-            glow_color = (20, 50, 35) if source == 'DET' else (35, 45, 20)
-            cv2.rectangle(overlay, (xmin, ymin), (xmax, ymax), glow_color, -1)
-            cv2.addWeighted(overlay, 0.4, canvas, 0.6, 0, canvas)
+            # 3. Soft ROI glow
+            if source != 'NONE' and (xmax > xmin and ymax > ymin):
+                overlay = canvas.copy()
+                glow_color = (20, 50, 35) if source == 'DET' else (35, 45, 20)
+                cv2.rectangle(overlay, (xmin, ymin), (xmax, ymax), glow_color, -1)
+                cv2.addWeighted(overlay, 0.4, canvas, 0.6, 0, canvas)
 
         # 4. Microboxes (16x16 macroblocks inside ROI) & Motion Vector Quivers
         for mb in mbs:
-            mx = int(mb['mb_x'] * 16 * scale_x)
-            my = int(mb['mb_y'] * 16 * scale_y)
-            mw = max(int(16 * scale_x), 2)
-            mh = max(int(16 * scale_y), 2)
+            mx = int(mb['mb_x'] * 16 * width / source_width)
+            my = int(mb['mb_y'] * 16 * height / source_height)
+            mw = max(int(16 * width / source_width), 2)
+            mh = max(int(16 * height / source_height), 2)
 
             # Microbox outline
             cv2.rectangle(canvas, (mx, my), (mx + mw, my + mh), (50, 165, 95), 1)
@@ -162,16 +169,19 @@ def render_single_video(
             cx = mx + mw // 2
             cy = my + mh // 2
             # dx, dy are quarter-pixel units in H.264
-            dx = int((mb['dx'] / 4.0) * scale_x * 2.5)
-            dy = int((mb['dy'] / 4.0) * scale_y * 2.5)
+            dx = int((mb['dx'] / 4.0) * width / source_width * 2.5)
+            dy = int((mb['dy'] / 4.0) * height / source_height * 2.5)
 
             if abs(dx) > 0 or abs(dy) > 0:
-                cv2.arrowedLine(canvas, (cx, cy), (cx + dx, cy + dy), (0, 240, 255), 1, tipLength=0.35)
+                # H.264 MVs point from the current block to its reference block.
+                cv2.arrowedLine(canvas, (cx, cy), (cx - dx, cy - dy), (0, 240, 255), 1, tipLength=0.35)
             else:
                 cv2.circle(canvas, (cx, cy), 1, (0, 200, 220), -1)
 
         # 5. Bounding Box & Accents
-        if source != 'NONE' and (xmax > xmin and ymax > ymin):
+        for source, conf, xmin, ymin, xmax, ymax in boxes:
+            if source == 'NONE' or not (xmax > xmin and ymax > ymin):
+                continue
             # DET = Bright Green, PROP = Cyan / Gold
             box_color = (0, 255, 128) if source == 'DET' else (255, 200, 0)
             cv2.rectangle(canvas, (xmin, ymin), (xmax, ymax), box_color, 2)

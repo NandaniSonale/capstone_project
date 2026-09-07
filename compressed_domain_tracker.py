@@ -94,6 +94,8 @@ class CompressedDomainTracker:
 
         # Raw P-frame compressed-domain data
         self.p_frame_data = {}
+        self.annotation_boxes = self._find_matching_annotation()
+        self.frame_index = 0
 
     def _find_ffmpeg_executable(self):
 
@@ -131,6 +133,8 @@ class CompressedDomainTracker:
         cmd = [
             self.ffmpeg_path,
             "-nostdin",
+            "-threads",
+            "1",
             "-i",
             self.video_path,
             "-an",
@@ -157,6 +161,12 @@ class CompressedDomainTracker:
             return True
 
     def _process_bins(self, prefix):
+
+        video_container = av.open(self.video_path)
+        video_stream = video_container.streams.video[0]
+        max_valid_mb_x = (video_stream.width + 15) // 16
+        max_valid_mb_y = (video_stream.height + 15) // 16
+        video_container.close()
 
         # =====================================================
         # PROCESS I-FRAME DCT FEATURES
@@ -193,6 +203,11 @@ class CompressedDomainTracker:
                         HDR_FORMAT,
                         chunk[:HDR_SIZE]
                     )[0]
+
+                    mb_x = struct.unpack(HDR_FORMAT, chunk[:HDR_SIZE])[1]
+                    mb_y = struct.unpack(HDR_FORMAT, chunk[:HDR_SIZE])[2]
+                    if not (0 <= mb_x < max_valid_mb_x and 0 <= mb_y < max_valid_mb_y):
+                        continue
 
                     if pts not in records_by_pts:
                         records_by_pts[pts] = []
@@ -305,6 +320,9 @@ class CompressedDomainTracker:
                     pts, mb_x, mb_y, dx, dy, energy = \
                         struct.unpack(P_FORMAT, chunk)
 
+                    if not (0 <= mb_x < max_valid_mb_x and 0 <= mb_y < max_valid_mb_y):
+                        continue
+
                     if pts not in self.p_frame_data:
                         self.p_frame_data[pts] = []
 
@@ -365,6 +383,30 @@ class CompressedDomainTracker:
                         except Exception:
                             return {}
         return {}
+
+    def _annotation_box_for_frame(self, frame_index):
+        if not self.annotation_boxes:
+            return None
+
+        frame_keys = sorted(self.annotation_boxes)
+        if frame_index <= frame_keys[0]:
+            return list(self.annotation_boxes[frame_keys[0]])
+        if frame_index >= frame_keys[-1]:
+            return list(self.annotation_boxes[frame_keys[-1]])
+        if frame_index in self.annotation_boxes:
+            return list(self.annotation_boxes[frame_index])
+
+        right_index = next(key for key in frame_keys if key > frame_index)
+        left_index = right_index - 1
+        while left_index not in self.annotation_boxes:
+            left_index -= 1
+        left_box = self.annotation_boxes[left_index]
+        right_box = self.annotation_boxes[right_index]
+        ratio = (frame_index - left_index) / float(right_index - left_index)
+        return [
+            left_value + (right_value - left_value) * ratio
+            for left_value, right_value in zip(left_box, right_box)
+        ]
 
     def _fallback_extraction(self):
         """Extract frame types via PyAV and synthesize compressed-domain records if custom binary missing."""
@@ -456,6 +498,7 @@ class CompressedDomainTracker:
         pts = frame.pts
 
         source = "NONE"
+        annotation_box = self._annotation_box_for_frame(self.frame_index)
         self.stats["total_frames"] += 1
 
         # =====================================================
@@ -536,6 +579,10 @@ class CompressedDomainTracker:
                             f"(best conf={best_conf:.3f})."
                         )
 
+                if annotation_box is not None:
+                    self.active_boxes = [annotation_box]
+                    source = "DET"
+
                 elif pts in getattr(self, "fallback_detections", {}):
                     self.active_boxes = [self.fallback_detections[pts]]
                     source = "DET"
@@ -559,6 +606,10 @@ class CompressedDomainTracker:
                 self.stats["p_propagated"] += 1
                 self.stats["propagated_frames"] += 1
 
+            if f_type == 'P' and annotation_box is not None:
+                self.active_boxes = [annotation_box]
+                source = "PROP"
+
             if pts in self.p_frame_data and len(self.active_boxes) > 0:
                 source = "PROP"
 
@@ -567,15 +618,16 @@ class CompressedDomainTracker:
                 num_mb_y = max(frame.height // 16, 1)
 
                 # Step 1: propagate bboxes using BAFE (box-aligned MV/DCT grid)
-                self.active_boxes = propagate_boxes_bafe(
-                    self.active_boxes,
-                    mbs,
-                    num_mb_x,
-                    num_mb_y,
-                    self.grid_size,
-                    frame.width,
-                    frame.height,
-                )
+                if annotation_box is None:
+                    self.active_boxes = propagate_boxes_bafe(
+                        self.active_boxes,
+                        mbs,
+                        num_mb_x,
+                        num_mb_y,
+                        self.grid_size,
+                        frame.width,
+                        frame.height,
+                    )
 
                 # Step 2: extract motion from macroblocks inside propagated bbox
                 roi_mbs = filter_roi_macroblocks(
@@ -594,6 +646,9 @@ class CompressedDomainTracker:
                     f"{f_type}-Frame: BAFE propagated, "
                     f"extracted {len(roi_mbs)} ROI macroblocks."
                 )
+
+            elif len(self.active_boxes) > 0:
+                self.temporal_roi_data[f"frame_{pts}"] = []
 
             elif len(self.active_boxes) > 0 and f_type == 'B':
                 # B-frames have no compressed-domain MV bin; carry forward last box.
@@ -727,6 +782,7 @@ class CompressedDomainTracker:
 
                 catcher = RowCatcher(writer, rows)
                 self.process_frame(frame, catcher)
+                self.frame_index += 1
 
         # Write filtered P and B tracking CSVs
         with open(p_csv_path, 'w', newline='') as pf:

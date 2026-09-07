@@ -8,6 +8,11 @@ import csv
 from compressed_domain_tracker import CompressedDomainTracker
 from generate_video_output import generate_video
 
+PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), os.pardir))
+DEFAULT_FOLDER = os.path.join(PROJECT_ROOT, "Human Activity Recognition - Video Dataset", "Walking")
+DEFAULT_MODEL = os.path.join(PROJECT_ROOT, "best_model .h5")
+DEFAULT_OUTPUT = os.path.join(PROJECT_ROOT, "tracking_outputs", "Walking_dataset")
+
 
 def _video_name_from_path(video_file):
     return os.path.splitext(os.path.basename(video_file))[0]
@@ -252,6 +257,7 @@ def process_folder(
             video_path=video_file,
             model_path=model_path,
             conf_threshold=conf_threshold,
+            output_dir=output_dir,
         )
 
         video_roi_data = tracker.run() or {}
@@ -303,10 +309,10 @@ def process_folder(
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--folder", "-f", default=r"Human Activity Recognition - Video Dataset\Walking",
+    parser.add_argument("--folder", "-f", default=DEFAULT_FOLDER,
                         help="Input folder containing MP4 videos")
-    parser.add_argument("--model", "-m", default=r"best_model .h5", help="Model path")
-    parser.add_argument("--out", "-o", default=r"tracking_outputs\Walking_dataset", help="Output folder")
+    parser.add_argument("--model", "-m", default=DEFAULT_MODEL, help="Model path")
+    parser.add_argument("--out", "-o", default=DEFAULT_OUTPUT, help="Output folder")
     parser.add_argument("--limit", "-l", type=int, default=0,
                         help="Number of videos to process (0 for ALL videos in folder)")
     parser.add_argument("--render", action="store_true",
