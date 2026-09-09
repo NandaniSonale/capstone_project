@@ -100,4 +100,3 @@ python train_and_evaluate_action_model.py --output "output"
 
 ## 👥 Authors & Collaborators
 - **Nandani Sonale**
-- **Keshav**
