@@ -1,102 +1,332 @@
-# Compressed-Domain Object Tracking and Human Activity Recognition (HAR)
+Unified Compressed-Domain Framework for Object Detection and Human Action Recognition
+Overview
 
-A high-performance pipeline for object detection, BAFE (Block-Adaptive Feature Extraction) propagation across P/B-frames, and BiLSTM-based Human Activity Recognition directly within the compressed video domain.
+This project implements a compressed-domain object detection and tracking pipeline for H.264 video. The system uses information available in the compressed representation instead of performing object detection independently on every decoded frame.
 
-[![GitHub Release](https://img.shields.io/github/v/release/NandaniSonale/capstone_project?label=Visualized%20Videos&color=brightgreen)](https://github.com/NandaniSonale/capstone_project/releases/tag/v1.0.0-artifacts)
+The implemented pipeline processes I-frames, P-frames, and B-frames and uses:
 
----
+I-frame DCT/frequency information
+I-frame object detection
+P-frame motion vectors
+Macroblock-level motion information
+DCT energy
+Box-Aligned Feature Extraction (BAFE)
+Bounding-box propagation
+ROI macroblock extraction
+Object tracking
+Tracking visualization
+Detection and tracking evaluation
+1. H.264 Compressed-Domain Processing
 
-## 📥 Visualized Output Demonstration Videos
+The project extracts information from the H.264 compressed representation.
 
-Full visualized `.mp4` video outputs featuring:
-- **Bounding Boxes**: Color-coded detection anchors (`DET` on I-frames) and motion propagations (`PROP` on P/B-frames)
-- **16×16 Macroblock Microboxes**: Motion grid within Regions of Interest (ROI)
-- **Real-Time Motion Vector Arrows**: Visualizing directional magnitude `(dx, dy)`
-- **Telemetry HUD Overlays**: Frame type, PTS, and macroblock count
+The implemented pipeline works with:
 
-Directly stream or download the rendered demonstration videos from the official GitHub Release:
-👉 **[Download Rendered Output Videos (v1.0.0-artifacts)](https://github.com/NandaniSonale/capstone_project/releases/tag/v1.0.0-artifacts)**
+I-frames
+P-frames
+B-frames
+Macroblocks
+Motion vectors
+DCT/frequency information
+DCT energy
+PTS information
 
----
+The extracted information is used for object detection and temporal tracking.
 
-## 📊 Evaluation & Accuracy Benchmarks
+2. I-Frame Processing
 
-### 1. Compressed-Domain Object Detection & Propagation Accuracy
-Evaluated across all **171 videos** and **51,365 frames** from the Walking activity dataset:
+I-frames are used for object detection and DCT/frequency feature extraction.
 
-| Metric | Score | Note |
-| :--- | :--- | :--- |
-| **mAP @ IoU 0.50** | **98.48%** | High precision detection and propagation |
-| **mAP @ IoU 0.75** | **71.92%** | Strict overlap alignment |
-| **mAP @ IoU [0.50:0.95]**| **68.83%** | Comprehensive COCO-style metric |
-| **Overall Mean IoU** | **81.59%** | Average across all 51,365 frames |
-| **I-Frame Anchor IoU** | **98.55%** | Ground-truth keyframe alignment |
-| **BAFE Propagation IoU** | **80.98%** | P and B frame motion propagation |
-| **Precision @ 0.50** | **98.48%** | Low false-positive rate |
-| **Recall @ 0.50** | **98.73%** | High tracking retention |
-| **F1-Score @ 0.50** | **98.60%** | Balanced detection performance |
+I-Frame
+   │
+   ├── DCT Coefficients
+   │        ↓
+   │   Frequency Features
+   │
+   └── YOLO
+        ↓
+   Object Detection
+        ↓
+   Initial BBox
 
-### 2. BiLSTM Action Recognition Model
-Trained on temporal compressed-domain motion features across 5 human activities:
-- **Walking F1-Score**: **85.00%** (Precision: 77.27%, Recall: 94.44%)
-- **Walking While Using Phone F1-Score**: **81.25%** (Precision: 92.86%, Recall: 72.22%)
-- **Standing Still F1-Score**: **68.75%**
-- **Macro Precision**: **69.98%**
-- **Confusion Matrix**: Saved at [`output/action_confusion_matrix.png`](output/action_confusion_matrix.png)
+YOLO provides the initial bounding box and confidence for the detected object.
 
----
+This bounding box is then used as the reference for propagation in subsequent frames.
 
-## 📂 Project Architecture
+3. DCT / Frequency Feature Extraction
 
-```
-capstone_project/
-├── compressed_domain_tracker.py      # Core compressed-domain tracker & BAFE propagation engine
-├── batch_process.py                  # Batch processor for 171-video dataset with checkpointing
-├── render_dataset_videos.py          # Visualized video generator with microboxes & motion arrows
-├── train_and_evaluate_action_model.py# BiLSTM activity classifier model
-├── evaluate_detector_accuracy.py     # IoU, mAP, precision, and recall evaluator
-├── print_accuracy_report.py          # Terminal CLI dashboard displaying all benchmark metrics
-├── upload_release_assets.py          # Automation utility for GitHub Releases
-├── output/                           # Evaluation reports, confusion matrices, and dataset summaries
-│   ├── processing_summary.csv        # Master execution metrics across 171 videos
-│   ├── detector_accuracy_report.json # Detailed detection benchmarks
-│   ├── action_recognition_metrics.json# Activity classification metrics
-│   └── action_confusion_matrix.png   # Action recognition confusion matrix
-└── README.md                         # Documentation & Quickstart
-```
+DCT coefficients are extracted from the I-frame compressed information.
 
----
+The coefficients are grouped into:
 
-## 🚀 Quickstart & Usage
+Low Frequency
+Mid Frequency
+High Frequency
 
-### 1. View Accuracy Report in Terminal
-To view the full formatted accuracy dashboard with detection and classification benchmarks:
-```bash
-python print_accuracy_report.py
-```
+The energy for the frequency groups is calculated as:
 
-### 2. Run Batch Tracking on a Dataset Folder
-```bash
-python batch_process.py --input "HAR_annotations/Walking" --output "output"
-```
+Energy = log(1 + Σ coefficient²)
 
-### 3. Generate Visualized Output Videos (.mp4)
-To render video outputs with bounding boxes, macroblocks, and motion vectors:
-```bash
-python render_dataset_videos.py --output "output"
-```
+The resulting frequency information is stored in .npy files.
 
-### 4. Evaluate Object Detector & Tracker Accuracy
-```bash
-python evaluate_detector_accuracy.py --annotations "HAR_annotations/Walking" --output "output"
-```
+4. P-Frame Motion Information
 
-### 5. Train & Evaluate Action Recognition Model
-```bash
-python train_and_evaluate_action_model.py --output "output"
-```
+P-frame compressed-domain information is extracted at the macroblock level.
 
----
+The extracted information contains:
 
-## 👥 Authors & Collaborators
-- **Nandani Sonale**
+PTS
+mb_x
+mb_y
+dx
+dy
+DCT Energy
+
+Example:
+
+{
+    "mb_x": 25,
+    "mb_y": 47,
+    "dx": -6,
+    "dy": -24,
+    "dct_energy": 44.0
+}
+
+Here:
+
+mb_x, mb_y represent macroblock coordinates.
+dx, dy represent motion-vector components.
+dct_energy represents the associated DCT energy.
+PTS identifies the temporal position of the frame.
+5. B-Frame Processing
+
+B-frames are included in the temporal tracking pipeline.
+
+The propagated object state is maintained through B-frames using the available propagation and temporal information.
+
+Previous BBox
+     │
+     ▼
+B-Frame
+     │
+     ▼
+Temporal Propagation
+     │
+     ▼
+Updated Object State
+
+The primary direct compressed-domain motion extraction in the current implementation is from the P-frame motion records. B-frame processing is handled through the propagation/tracking pipeline.
+
+6. BAFE
+Box-Aligned Feature Extraction
+
+The project implements BAFE (Box-Aligned Feature Extraction) for bounding-box propagation.
+
+BAFE uses the previous bounding box to select relevant compressed-domain macroblocks and their motion information.
+
+Previous BBox
+     │
+     ▼
+20% Neighborhood
+     │
+     ▼
+3 × 3 Grid
+     │
+     ▼
+16 × 16 Macroblocks
+     │
+     ▼
+Extract dx / dy
+     │
+     ▼
+Median Motion
+     │
+     ▼
+BBox Displacement
+     │
+     ▼
+Updated BBox
+20% Neighborhood
+
+The previous bounding box is expanded by 20% to include nearby macroblocks around the object.
+
+3 × 3 Grid
+
+The expanded ROI is divided into a 3 × 3 grid to preserve the spatial distribution of the motion information.
+
+16 × 16 Macroblocks
+
+The relevant H.264 macroblocks are identified inside the ROI.
+
+Median Motion
+
+The motion vectors from the selected macroblocks are aggregated using the median to reduce the effect of noisy or outlier motion vectors.
+
+Bounding-Box Update
+
+The resulting motion is used to update the center of the bounding box.
+
+The current implementation retains:
+
+BBox Width       → unchanged
+BBox Height      → unchanged
+Confidence       → retained
+BBox Center      → updated using motion
+7. Object Propagation
+
+The implemented propagation process is:
+
+I-Frame
+   │
+   ▼
+YOLO Detection
+   │
+   ▼
+Initial Bounding Box
+   │
+   ▼
+P/B Frame
+   │
+   ▼
+BAFE
+   │
+   ▼
+Motion-Based Displacement
+   │
+   ▼
+Updated Bounding Box
+
+This allows the object to be tracked across subsequent frames without applying YOLO independently to every frame.
+
+8. ROI Macroblock Extraction
+
+After propagation, macroblocks associated with the propagated object region are selected.
+
+The ROI motion information is stored in:
+
+roi_motion_data.json
+
+The stored information includes:
+
+mb_x
+mb_y
+dx
+dy
+dct_energy
+
+This provides the macroblock-level compressed-domain information around the tracked object.
+
+9. Object Tracking Outputs
+
+The tracking pipeline generates:
+
+tracking_results.csv
+p_frames_tracking.csv
+b_frames_tracking.csv
+
+The tracking results contain information such as:
+
+PTS
+Frame type
+Detection/propagation source
+Confidence
+Bounding-box coordinates
+
+Additional generated information includes:
+
+roi_motion_data.json
+motion_summary.json
+propagation_summary.json
+video_summary.json
+10. Visualization
+
+The tracking results are visualized using the generated tracking and ROI information.
+
+The visualization includes:
+
+Bounding boxes
+DET / PROP labels
+16 × 16 macroblock microboxes
+Motion-vector arrows
+Frame information
+Tracking telemetry
+
+This provides a visual representation of the compressed-domain object tracking process.
+
+11. Dataset Processing
+
+The pipeline supports batch processing of multiple videos.
+
+The main processing scripts are:
+
+batch_process.py
+batch_process_folder.py
+
+The implemented pipeline has been processed on the Walking dataset.
+
+Videos processed : 171
+Frames processed : 51,365
+12. Object Detection and Tracking Evaluation
+
+The implemented object detection and tracking pipeline has been evaluated using the following metrics:
+
+Metric	Result
+mAP @ 0.50	98.48%
+mAP @ 0.75	71.92%
+mAP @ 0.50:0.95	68.83%
+Mean IoU	81.59%
+I-frame Anchor IoU	98.55%
+BAFE Propagation IoU	80.98%
+Precision	98.48%
+Recall	98.73%
+F1 Score	98.60%
+
+These results represent the implemented object detection and compressed-domain tracking pipeline.
+
+13. Action Recognition / HAR
+
+The project title includes Human Action Recognition, but the HAR component is currently under development.
+
+The completed tracking pipeline provides temporal object and motion information that will be used for the action-recognition stage.
+
+H.264 Video
+     │
+     ▼
+Compressed-Domain Processing
+     │
+     ▼
+Object Detection
+     │
+     ▼
+P/B Temporal Tracking
+     │
+     ▼
+Motion / Temporal Information
+     │
+     ▼
+Human Action Recognition
+        🚧
+
+HAR is therefore not included as a completed result in the current implementation.
+
+Project Status
+Component	Status
+H.264 compressed-domain processing	✅ Completed
+I-frame processing	✅ Completed
+P-frame processing	✅ Completed
+B-frame processing	✅ Completed
+DCT/frequency extraction	✅ Completed
+I-frame object detection	✅ Completed
+P-frame motion-vector extraction	✅ Completed
+Macroblock processing	✅ Completed
+DCT energy extraction/storage	✅ Completed
+BAFE	✅ Completed
+ROI macroblock extraction	✅ Completed
+Bounding-box propagation	✅ Completed
+Object tracking	✅ Completed
+Tracking visualization	✅ Completed
+Batch processing	✅ Completed
+Object detection evaluation	✅ Completed
+Tracking/propagation evaluation	✅ Completed
+Human Action Recognition	🚧 In Progress
+HAR evaluation	🚧 In Progress
