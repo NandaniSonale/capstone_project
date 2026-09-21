@@ -1,676 +1,205 @@
-# Unified Compressed-Domain Framework for Object Detection and Human Action Recognition
+# Compressed-Domain Object Tracking and Human Activity Recognition (HAR)
 
-## 📌 Overview
+[![GitHub Release](https://img.shields.io/github/v/release/NandaniSonale/capstone_project?label=Visualized%20Videos&color=brightgreen)](https://github.com/NandaniSonale/capstone_project/releases/tag/v1.0.0-artifacts)
 
-This project presents a unified framework for **object detection, bounding-box tracking, and human action recognition using H.264 compressed-domain information**.
-
-Instead of fully decoding every video frame into RGB and performing conventional image processing, the framework directly utilizes information available from the H.264 compressed representation, including:
-
-- DCT/frequency-domain coefficients
-- Macroblock-level information
-- Motion vectors
-- DCT energy
-- I/P/B frame structure
-- ROI-based compressed-domain motion information
-
-A trained **SSD-based object detection model** is used on I-frames to obtain the initial object bounding box. For subsequent frames, the system uses **BAFE (Box-Aligned Feature Extraction)** to estimate object motion from relevant macroblocks and propagate the **bounding box** across frames.
-
-The resulting tracking information is visualized and can be used as temporal information for the Human Action Recognition (HAR) stage.
+A high-performance pipeline for compressed-domain human detection, **Box-Aligned Feature Extraction (BAFE) propagation across P/B-frames**, and temporal BiLSTM-based Human Activity Recognition directly within the H.264 video codec domain without full RGB pixel decoding or optical flow computation.
 
 ---
 
-## 🎯 Project Objectives
+## 📥 Visualized Output Demonstration Videos
 
-The major objectives of the project are:
+Full visualized `.mp4` video outputs featuring:
+- **Bounding Boxes**: Color-coded detection anchors (`DET` on I-frames) and motion propagations (`PROP` on P/B-frames).
+- **16×16 Macroblock Microboxes**: Motion grid within Regions of Interest (ROI).
+- **Real-Time Motion Vector Arrows**: Visualizing directional magnitude `(dx, dy)`.
+- **Telemetry HUD Overlays**: Frame type (I / P / B), PTS timestamp, and active macroblock count.
 
-1. Process H.264 video directly using compressed-domain information.
-2. Extract DCT/frequency-domain features from I-frames.
-3. Extract motion vectors and DCT energy from compressed video information.
-4. Detect objects using a trained SSD-based detector.
-5. Propagate the detected **bounding box** across P/B frames.
-6. Use BAFE to obtain motion information from ROI-aligned macroblocks.
-7. Generate frame-level tracking and motion information.
-8. Visualize bounding boxes, motion vectors, and ROI macroblocks.
-9. Evaluate detection and bounding-box tracking performance.
-10. Use the extracted temporal information as the foundation for Human Action Recognition.
+Stream or download rendered demonstration videos directly from GitHub Releases:
+👉 **[Download Rendered Output Videos (v1.0.0-artifacts)](https://github.com/NandaniSonale/capstone_project/releases/tag/v1.0.0-artifacts)**
 
 ---
 
-# 🏗️ System Architecture
-
-```text
-                    H.264 Compressed Video
-                              │
-                              ▼
-                    ┌───────────────────┐
-                    │  Batch Processing │
-                    └─────────┬─────────┘
-                              │
-                              ▼
-                  ┌─────────────────────────┐
-                  │ H.264 Compressed-Domain│
-                  │       Analysis          │
-                  └────────────┬────────────┘
-                               │
-                 ┌─────────────┼─────────────┐
-                 ▼             ▼             ▼
-              I-Frames      P-Frames      B-Frames
-                 │             │             │
-                 ▼             ▼             ▼
-          DCT/Frequency     Motion Vectors  Propagated
-             Features       + DCT Energy     Bounding Box
-                 │             │             │
-                 ▼             │             │
-          SSD Detection        │             │
-                 │             │             │
-                 ▼             │             │
-          Initial Bounding     │             │
-               Box             │             │
-                 │             │             │
-                 └─────────────┼─────────────┘
-                               ▼
-                     BAFE-Based Processing
-                               │
-                               ▼
-                     ROI + Macroblocks
-                               │
-                               ▼
-                       Motion dx / dy
-                               │
-                               ▼
-                     Median Motion Estimate
-                               │
-                               ▼
-                  Bounding-Box Propagation
-                               │
-                               ▼
-                     Tracking Results
-                               │
-                               ▼
-                  Visualization / Evaluation
-                               │
-                               ▼
-                Temporal Features for HAR
-🔹 1. H.264 Compressed-Domain Processing
-
-The framework works with the compressed representation of H.264 video.
-
-An H.264 video consists of different types of frames:
-
-I-frames – independently coded frames
-P-frames – predicted using reference frames
-B-frames – bidirectionally predicted frames
-
-The project uses the information available in these compressed frames instead of relying entirely on RGB-frame processing.
-
-The main compressed-domain information used by the system includes:
-
-H.264 Bitstream
-     │
-     ├── DCT / Frequency Information
-     │
-     ├── Macroblock Information
-     │
-     ├── Motion Vectors
-     │
-     └── DCT Energy
-
-This allows the system to obtain useful spatial and temporal information directly from the compressed representation.
-
-🔹 2. I-Frame Processing
-
-I-frames provide the starting point for object detection.
-
-The processing pipeline is:
-
-I-Frame
-   │
-   ▼
-DCT Coefficient Extraction
-   │
-   ▼
-Frequency-Domain Feature Generation
-   │
-   ▼
-SSD Object Detection Model
-   │
-   ▼
-Initial Bounding Box
-
-The initial bounding box obtained from the detector becomes the reference bounding box for subsequent tracking.
-
-DCT Frequency Groups
-
-The extracted DCT coefficients are grouped into frequency bands:
-
-Low Frequency:
-[0, 1, 4]
-
-Mid Frequency:
-[2, 3, 5, 6, 8]
-
-High Frequency:
-[7, 9, 10, 11, 12, 13, 14, 15]
-
-For the frequency-map generation, energy is calculated using:
-
-Energy = log1p(sum(coefficients²))
-
-These frequency-domain features provide information from the compressed representation of the I-frame.
-
-🔹 3. SSD Object Detection
-
-A trained SSD-based object detection model is used to detect the target object on I-frames.
-
-The detector provides:
-
-Bounding-box coordinates
-Detection confidence
-Object location
-
-The detection stage initializes the tracking process.
-
-I-Frame
-   │
-   ▼
-DCT / Frequency Features
-   │
-   ▼
-Trained SSD Detector
-   │
-   ▼
-Detected Object
-   │
-   ▼
-Initial Bounding Box
-
-The detection confidence comes from the SSD model prediction and is not calculated from motion vectors or BAFE.
-
-🔹 4. P-Frame Processing
-
-P-frames contain compressed-domain motion information.
-
-The project extracts information such as:
-
-PTS
-Macroblock X
-Macroblock Y
-dx
-dy
-DCT Energy
-
-Each motion record represents compressed-domain information associated with a macroblock.
-
-Example:
-
-PTS = 512
-mb_x = 25
-mb_y = 47
-dx = -6
-dy = -24
-dct_energy = 44.0
-
-Where:
-
-PTS = Presentation Time Stamp
-mb_x, mb_y = macroblock grid coordinates
-dx, dy = H.264 motion-vector components
-dct_energy = DCT energy associated with the macroblock
-🔹 5. Macroblocks
-
-H.264 processing uses 16 × 16 pixel macroblocks.
-
-For a video resolution of 960 × 540:
-
-Macroblocks horizontally:
-
-ceil(960 / 16) = 60
-
-Macroblocks vertically:
-
-ceil(540 / 16) = 34
-
-Therefore, approximately:
-
-60 × 34 = 2040 macroblocks
-
-are present in the frame.
-
-The tracking system does not store all macroblocks in the ROI JSON. It selects the macroblocks relevant to the propagated bounding box.
-
-🔹 6. Motion Vectors
-
-Motion vectors describe the displacement associated with H.264 macroblocks.
-
-The extracted values include:
-
-dx
-dy
-
-The project uses H.264 quarter-pixel motion-vector representation.
-
-The conversion is approximately:
-
-pixel displacement = MV / 4
-
-Because H.264 motion vectors point toward the reference block, the forward object displacement is handled as:
-
-forward_dx = -dx / 4
-forward_dy = -dy / 4
-
-For example:
-
-dx = -6
-dy = -24
-
-gives approximately:
-
-forward_dx = +1.5 pixels
-forward_dy = +6 pixels
-
-These motion values are used by BAFE to estimate how the bounding box should move.
-
-🔹 7. DCT Energy
-
-DCT energy provides additional compressed-domain frequency information.
-
-For P-frame macroblocks, the extracted motion record contains:
-
-mb_x
-mb_y
-dx
-dy
-dct_energy
-
-DCT energy is stored in the ROI motion data as:
-
-"dct_energy"
-
-The current BAFE bounding-box displacement is primarily determined using the aggregated motion-vector information (dx, dy).
-
-The DCT energy is retained as an additional compressed-domain feature.
-
-🔹 8. Bounding-Box Propagation
-
-The framework does not propagate the object itself.
-
-It propagates the bounding box associated with the detected object.
-
-The process is:
-
-SSD Detection
-      │
-      ▼
-Initial Bounding Box
-      │
-      ▼
-BAFE Motion Analysis
-      │
-      ▼
-Estimate Bounding-Box Displacement
-      │
-      ▼
-Move Bounding-Box Center
-      │
-      ▼
-Propagated Bounding Box
-
-The bounding-box width, height, and confidence are preserved while the center position is updated according to the estimated motion.
-
-🔹 9. BAFE – Box-Aligned Feature Extraction
-
-BAFE (Box-Aligned Feature Extraction) is the main method used for bounding-box propagation.
-
-BAFE aligns compressed-domain macroblock features with the current bounding box.
-
-The process is:
-
-Previous Bounding Box
-          │
-          ▼
-Expand ROI by 20%
-          │
-          ▼
-Create Box-Aligned ROI
-          │
-          ▼
-Divide ROI into 3 × 3 Grid
-          │
-          ▼
-Find Relevant 16 × 16 Macroblocks
-          │
-          ▼
-Collect Motion Vectors
-          │
-          ▼
-Aggregate Motion Using Median
-          │
-          ▼
-Calculate Bounding-Box Displacement
-          │
-          ▼
-Update Bounding-Box Center
-BAFE Parameters
-
-The current implementation uses:
-
-Grid size              = 3 × 3
-Neighborhood scale     = 20%
-Macroblock size        = 16 × 16
-Motion aggregation     = Median
-🔹 10. ROI Generation
-
-The previous bounding box is expanded by approximately 20% to create a neighborhood around the object.
-
-This provides additional macroblocks around the bounding box that may contain useful motion information.
-
-             Expanded ROI
-      ┌───────────────────────┐
-      │                       │
-      │    ┌─────────────┐    │
-      │    │ Bounding Box│    │
-      │    │             │    │
-      │    └─────────────┘    │
-      │                       │
-      └───────────────────────┘
-
-The expanded ROI is divided into a:
-
-3 × 3 grid
-
-Macroblocks are assigned to the corresponding grid cells.
-
-🔹 11. Motion Aggregation
-
-Motion vectors from relevant macroblocks may contain noise or outliers.
-
-Therefore, BAFE uses the median motion rather than simply using one macroblock.
-
-For example:
-
-Macroblock motions:
-
-dx: -5, -6, -6, -7, -40
-dy: -23, -24, -24, -25, 50
-
-The extreme values can be outliers.
-
-The median provides a more robust estimate:
-
-Median dx ≈ -6
-Median dy ≈ -24
-
-The resulting motion is then converted into bounding-box displacement.
-
-🔹 12. Bounding-Box Update
-
-The estimated displacement is applied to the center of the bounding box.
-
-Conceptually:
-
-New Center X = Old Center X + displacement X
-
-New Center Y = Old Center Y + displacement Y
-
-The current implementation keeps:
-
-Width       → unchanged
-Height      → unchanged
-Confidence  → unchanged
-
-Only the center position is updated based on the estimated motion.
-
-🔹 13. B-Frame Processing
-
-B-frames are also handled as part of the bounding-box tracking pipeline.
-
-When an active bounding box is available, the propagated state is used for tracking.
-
-The B-frame processing uses the available compressed-domain motion information and propagated state to continue bounding-box tracking.
-
-The primary direct compressed-domain motion extraction in the current implementation is performed for P-frame data.
-
-🔹 14. ROI Macroblock Filtering
-
-After bounding-box propagation, the system selects the macroblocks whose centers fall inside the propagated bounding box.
-
-The selected information includes:
-
-mb_x
-mb_y
-dx
-dy
-dct_energy
-
-This produces ROI-specific compressed-domain motion information.
-
-The information is stored in:
-
-roi_motion_data.json
-
-Example structure:
-
+## 🎯 Core Project Concept & Architecture
+
+```
+                  +-------------------------------------------------+
+                  |       Compressed H.264 Video Stream (.mp4)      |
+                  +-------------------------------------------------+
+                                           |
+                    +----------------------+----------------------+
+                    |                                             |
+                    v                                             v
+        [ I-FRAME KEYFRAMES ]                         [ P / B FRAMES ]
+        Extract 4x4 DCT Sub-Bands                     Extract Motion Vectors (dx, dy)
+        (Low, Mid, High Frequencies)                  Extract DCT Energy (sum|coeffs|)
+                    |                                             |
+                    v                                             |
+        SSD Object Detector (300x300)                             |
+        Initial Human BBox [cx, cy, w, h]                         |
+                    |                                             |
+                    +----------------------+----------------------+
+                                           |
+                                           v
+                             +---------------------------+
+                             |   BAFE Motion Propagation |
+                             |   (Box-Aligned Median MV) |
+                             +---------------------------+
+                                           |
+                                           v
+                             +---------------------------+
+                             |   Spatial ROI MB Filter   |
+                             |   Keep MBs inside Box     |
+                             +---------------------------+
+                                           |
+                                           v
+                             +---------------------------+
+                             | Temporal ROI Motion Data  |
+                             | (roi_motion_data.json)    |
+                             +---------------------------+
+                                           |
+                                           v
+                             +---------------------------+
+                             | BiLSTM HAR Action Model   |
+                             +---------------------------+
+```
+
+### Key Principles
+1. **Zero Pixel Decoding**: Operations remain 100% inside H.264 codec transform domain & motion vectors. No RGB decoding or OpenCV optical flow calculation.
+2. **Spatial Bounding Box Filter**: Human bounding box acts as a spatial ROI filter:
+   $$\text{Action Features} = \text{Motion Vectors (dx, dy)} + \text{DCT Energy inside ROI across frames}$$
+3. **BAFE Propagation**: Updates bounding box position on P and B frames using median motion vector displacement.
+
+---
+
+## 📊 Evaluation & Benchmarks
+
+### 1. Compressed-Domain Object Detection & Propagation Accuracy
+Evaluated across **171 videos** (51,365 total frames) from the dataset:
+
+| Metric | Score | Note |
+| :--- | :--- | :--- |
+| **mAP @ IoU 0.50** | **98.48%** | High precision detection and propagation |
+| **mAP @ IoU 0.75** | **71.92%** | Strict overlap alignment |
+| **mAP @ IoU [0.50:0.95]**| **68.83%** | Comprehensive COCO-style metric |
+| **Overall Mean IoU** | **81.59%** | Average IoU across all 51,365 frames |
+| **I-Frame Anchor IoU** | **98.55%** | Ground-truth keyframe detection alignment |
+| **BAFE Propagation IoU** | **80.98%** | P and B frame motion vector propagation |
+| **Precision @ 0.50** | **98.48%** | Low false-positive rate |
+| **Recall @ 0.50** | **98.73%** | High tracking retention |
+| **F1-Score @ 0.50** | **98.60%** | Balanced tracking performance |
+
+### 2. BiLSTM Action Recognition Model
+Trained on temporal compressed-domain ROI motion features across human activities:
+- **Walking F1-Score**: **85.00%** (Precision: 77.27%, Recall: 94.44%)
+- **Walking While Using Phone F1-Score**: **81.25%** (Precision: 92.86%, Recall: 72.22%)
+- **Standing Still F1-Score**: **68.75%**
+- **Macro Precision**: **69.98%**
+- **Confusion Matrix Plot**: Saved at [`output/action_confusion_matrix.png`](output/action_confusion_matrix.png)
+
+---
+
+## 🧠 Algorithmic Foundations
+
+### Algorithm 1: Sub-Band Frequency Feature Map Generation
+*Source File:* [`feature_map.py`](file:///c:/Users/newuser/capstone_project/feature_map.py)
+Converts raw I-frame DCT coefficients from the H.264 bitstream into 3-channel spatial frequency maps without decoding pixels:
+1. Divide $16 \times 16$ macroblock into 16 sub-blocks of $4 \times 4$ DCT coefficients.
+2. Group coefficients into 3 frequency bands:
+   - **Low Frequency:** $E_{\text{low}} = \sum |c_0, c_1, c_4|^2$
+   - **Mid Frequency:** $E_{\text{mid}} = \sum |c_2, c_3, c_5, c_6, c_8|^2$
+   - **High Frequency:** $E_{\text{high}} = \sum |c_7, c_9, c_{10}, c_{11}, c_{12}, c_{13}, c_{14}, c_{15}|^2$
+3. Populate 3D spatial feature map tensor: $[ \log(1 + E_{\text{low}}), \log(1 + E_{\text{mid}}), \log(1 + E_{\text{high}}) ]$.
+
+### Algorithm 2: Box-Aligned Feature Extraction (BAFE) & Propagation
+*Source File:* [`bafe_propagation.py`](file:///c:/Users/newuser/capstone_project/bafe_propagation.py)
+Propagates human bounding boxes across P and B frames using macroblock motion vectors:
+1. Sample motion vectors $(dx, dy)$ for macroblocks inside and adjacent to the active bounding box.
+2. Calculate median displacement $(\text{median\_dx}, \text{median\_dy})$.
+3. Convert H.264 quarter-pixel MVs to normalized grid space:
+   $$\Delta \text{grid\_x} = -\frac{\text{median\_dx}}{4.0} \times \frac{\text{grid\_size}}{\text{frame\_width}}$$
+   $$\Delta \text{grid\_y} = -\frac{\text{median\_dy}}{4.0} \times \frac{\text{grid\_size}}{\text{frame\_height}}$$
+4. Update bounding box center: $\text{new\_cx} = \text{cx} + \Delta \text{grid\_x}$, $\text{new\_cy} = \text{cy} + \Delta \text{grid\_y}$.
+
+### Algorithm 3: P/B Frame Compressed-Domain Motion Data Format
+*Source File:* [`compressed_domain_tracker.py`](file:///c:/Users/newuser/capstone_project/compressed_domain_tracker.py)
+Extracted P/B frame macroblock motion data serialized per frame (`roi_motion_data.json`):
+```json
 {
-    "frame_512": [
-        {
-            "mb_x": 25,
-            "mb_y": 47,
-            "dx": -6,
-            "dy": -24,
-            "dct_energy": 44.0
-        }
-    ]
+  "frame_512": [
+    {"mb_x": 12, "mb_y": 8, "dx": 2, "dy": 1, "dct_energy": 14.85},
+    {"mb_x": 13, "mb_y": 8, "dx": 3, "dy": 1, "dct_energy": 19.20}
+  ],
+  "frame_1024": [
+    {"mb_x": 12, "mb_y": 8, "dx": 2, "dy": 2, "dct_energy": 16.10}
+  ]
 }
+```
 
-The frame identifier in this structure is based on the PTS, so frame_512 should be interpreted as a frame associated with PTS 512, not necessarily frame number 512.
+---
 
-🔹 15. Tracking Source
+## 📁 Repository Structure
 
-The tracking results identify whether the bounding box came from detection or propagation.
+```
+capstone_project/
+├── bafe_propagation.py               # BAFE propagation & macroblock grid displacement engine
+├── compressed_domain_tracker.py      # Core compressed-domain tracker & H.264 extraction orchestrator
+├── feature_map.py                    # Sub-band DCT frequency map generator for I-frames
+├── batch_process.py                  # Dataset batch runner across video folders with checkpointing
+├── batch_process_folder.py           # Single-folder dataset tracking pipeline
+├── render_dataset_videos.py          # Annotated video renderer (bounding boxes, microboxes, MV arrows)
+├── train_and_evaluate_action_model.py# BiLSTM action recognition classifier
+├── evaluate_detector_accuracy.py     # mAP, IoU, precision, and recall evaluation benchmark
+├── print_accuracy_report.py          # Terminal CLI dashboard displaying all benchmark metrics
+├── debug_extraction.py               # Data extraction verification & troubleshooting script
+├── upload_release_assets.py          # Automation utility for GitHub Release video uploads
+├── FFmpeg/                           # Custom FFmpeg source tree with h264_coeff_extract.c hook
+├── output/                           # Results and reports directory
+│   ├── processing_summary.csv        # Master dataset execution logs across all videos
+│   ├── detector_accuracy_report.json # Comprehensive object detection & BAFE tracking benchmarks
+│   ├── action_recognition_metrics.json# Activity classification metrics
+│   └── action_confusion_matrix.png   # Action recognition confusion matrix plot
+└── README.md                         # Unified Project Documentation & Quickstart
+```
 
-Two important sources are:
+---
 
-DET
-PROP
-DET
+## 🚀 Quickstart & Command Guide
 
-DET indicates that the bounding box was obtained from the object detector.
+### 1. Terminal Accuracy Dashboard
+Display full formatted accuracy report (IoU, mAP, precision, recall, F1):
+```bash
+python print_accuracy_report.py
+```
 
-This is primarily associated with I-frame detection.
+### 2. Single Video Tracking & P/B Propagation
+Run compressed-domain tracker on a single video file:
+```bash
+python compressed_domain_tracker.py --video "Human Activity Recognition - Video Dataset/Walking/Walking (23).mp4" --model "best_model .h5"
+```
 
-PROP
+### 3. Batch Tracking on Dataset Folder
+Run BAFE propagation across all dataset video folders:
+```bash
+python batch_process.py --input "Human Activity Recognition - Video Dataset/Walking" --output "output"
+```
 
-PROP indicates that the bounding box is being tracked using propagation.
+### 4. Render Visualized Annotated Videos (.mp4)
+Generate output videos with bounding boxes, macroblocks, and motion vector arrows:
+```bash
+python render_dataset_videos.py --output "output"
+```
 
-The general process is:
+### 5. Evaluate Tracking Accuracy & IoU Benchmarks
+```bash
+python evaluate_detector_accuracy.py --annotations "HAR_annotations/Walking" --output "output"
+```
 
-I-Frame
-   │
-   └── DET → Initial Bounding Box
-              │
-              ▼
-         P-Frame
-              │
-              └── PROP → Updated Bounding Box
-                              │
-                              ▼
-                         Next Frame
-🔹 16. Detection vs Bounding-Box Tracking
+### 6. Train & Evaluate Action Recognition Model
+```bash
+python train_and_evaluate_action_model.py --output "output"
+```
 
-The project separates detection from bounding-box tracking.
+---
 
-Detection
-SSD Model
-   ↓
-Find Object
-   ↓
-Generate Bounding Box
-Bounding-Box Tracking
-Existing Bounding Box
-   ↓
-BAFE
-   ↓
-Motion Vectors
-   ↓
-Bounding-Box Displacement
-   ↓
-Updated Bounding Box
-
-Therefore, the detector initializes the bounding box, while the compressed-domain motion information is used to track and propagate that bounding box across subsequent frames.
-
-🔹 17. Visualization
-
-The project provides visualization of the tracking results.
-
-The visualization can display:
-
-Bounding boxes
-DET / PROP source
-Macroblock regions
-Motion-vector arrows
-ROI information
-Frame telemetry
-
-The visualization pipeline reads the generated tracking CSV files and ROI motion information.
-
-Tracking CSV
-      +
-ROI Motion JSON
-      │
-      ▼
-Visualization Renderer
-      │
-      ▼
-Annotated Video
-
-The visualization stage is primarily responsible for displaying the results. It does not perform the main BAFE algorithm.
-
-🔹 18. Output Files
-
-The project generates several tracking and analysis outputs.
-
-Tracking Outputs
-tracking/
-motion/
-propagation/
-Main Result Files
-tracking_results.csv
-p_frames_tracking.csv
-b_frames_tracking.csv
-roi_motion_data.json
-motion_summary.json
-propagation_summary.json
-video_summary.json
-Frequency-Domain Output
-
-Frequency maps are generated as:
-
-.npy
-
-files.
-
-These contain the extracted frequency-domain information from the processed I-frames.
-
-🔹 19. Project Processing Flow
-
-The complete processing pipeline can be summarized as:
-
-H.264 Video
-     │
-     ▼
-Compressed-Domain Extraction
-     │
-     ├───────────────┐
-     │               │
-     ▼               ▼
-I-Frame          P/B Frames
-     │               │
-     ▼               ▼
-DCT Features     Motion Information
-     │               │
-     ▼               │
-SSD Detection       │
-     │               │
-     ▼               │
-Initial BBox         │
-     │               │
-     └───────┬───────┘
-             ▼
-           BAFE
-             │
-             ▼
-       ROI Expansion
-             │
-             ▼
-         3 × 3 Grid
-             │
-             ▼
-     16 × 16 Macroblocks
-             │
-             ▼
-       Motion dx / dy
-             │
-             ▼
-      Median Aggregation
-             │
-             ▼
-   Bounding-Box Displacement
-             │
-             ▼
-    Propagated Bounding Box
-             │
-             ▼
-      Tracking Results
-             │
-             ▼
-       Visualization
-             │
-             ▼
-       Evaluation / HAR
-📊 20. Dataset
-
-The current project processing includes the Walking dataset.
-
-Current processed dataset statistics:
-
-Metric	Value
-Videos	171
-Frames	51,365
-Dataset	Walking
-
-The dataset is used for object detection and bounding-box tracking evaluation.
-
-📈 21. Detection and Tracking Results
-
-The current evaluation reports the following results:
-
-Metric	Result
-mAP @ 0.50	98.48%
-mAP @ 0.75	71.92%
-mAP @ 0.50:0.95	68.83%
-Mean IoU	81.59%
-I-Frame Anchor IoU	98.55%
-BAFE Propagation IoU	80.98%
-Precision	98.48%
-Recall	98.73%
-F1 Score	98.60%
-
-These metrics evaluate the detection and bounding-box tracking performance of the implemented pipeline.
-
-🔬 22. Role of Each Component
-Component	Purpose
-H.264 Bitstream	Provides compressed-domain information
-I-Frame	Provides the initial detection frame
-DCT Coefficients	Provide frequency-domain information
-SSD Detector	Generates the initial object bounding box
-Macroblocks	Provide spatial units for compressed-domain analysis
-Motion Vectors	Provide object/region motion information
-DCT Energy	Provides additional frequency-domain information
-BAFE	Extracts ROI-aligned motion features
-Median Motion	Provides robust motion estimation
-Bounding-Box Propagation	Updates the bounding-box position
-ROI Filtering	Selects macroblocks inside the propagated bounding box
-Tracking CSV	Stores frame-level tracking results
-ROI JSON	Stores ROI macroblock motion information
-Visualization	Displays bounding boxes and motion information
-HAR	Uses temporal information for future action-recognition processing
+## 👥 Authors & Collaborators
+- **Nandani Sonale**
