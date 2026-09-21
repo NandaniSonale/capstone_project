@@ -1,8 +1,8 @@
-# Compressed-Domain Object Tracking and Human Activity Recognition (HAR)
+# Compressed-Domain Object Tracking & P/B-Frame BAFE Motion Vector Propagation
 
 [![GitHub Release](https://img.shields.io/github/v/release/NandaniSonale/capstone_project?label=Visualized%20Videos&color=brightgreen)](https://github.com/NandaniSonale/capstone_project/releases/tag/v1.0.0-artifacts)
 
-A high-performance pipeline for compressed-domain human detection, **Box-Aligned Feature Extraction (BAFE) propagation across P/B-frames**, and temporal BiLSTM-based Human Activity Recognition directly within the H.264 video codec domain without full RGB pixel decoding or optical flow computation.
+A high-performance pipeline for compressed-domain human detection, **Box-Aligned Feature Extraction (BAFE) propagation across P/B-frames**, and macroblock motion vector extraction directly within the H.264 video codec domain without full RGB pixel decoding or optical flow computation.
 
 ---
 
@@ -56,11 +56,6 @@ Stream or download rendered demonstration videos directly from GitHub Releases:
                              | Temporal ROI Motion Data  |
                              | (roi_motion_data.json)    |
                              +---------------------------+
-                                           |
-                                           v
-                             +---------------------------+
-                             | BiLSTM HAR Action Model   |
-                             +---------------------------+
 ```
 
 ### Key Principles
@@ -68,33 +63,6 @@ Stream or download rendered demonstration videos directly from GitHub Releases:
 2. **Spatial Bounding Box Filter**: Human bounding box acts as a spatial ROI filter:
    $$\text{Action Features} = \text{Motion Vectors (dx, dy)} + \text{DCT Energy inside ROI across frames}$$
 3. **BAFE Propagation**: Updates bounding box position on P and B frames using median motion vector displacement.
-
----
-
-## 📊 Evaluation & Benchmarks
-
-### 1. Compressed-Domain Object Detection & Propagation Accuracy
-Evaluated across **171 videos** (51,365 total frames) from the dataset:
-
-| Metric | Score | Note |
-| :--- | :--- | :--- |
-| **mAP @ IoU 0.50** | **98.48%** | High precision detection and propagation |
-| **mAP @ IoU 0.75** | **71.92%** | Strict overlap alignment |
-| **mAP @ IoU [0.50:0.95]**| **68.83%** | Comprehensive COCO-style metric |
-| **Overall Mean IoU** | **81.59%** | Average IoU across all 51,365 frames |
-| **I-Frame Anchor IoU** | **98.55%** | Ground-truth keyframe detection alignment |
-| **BAFE Propagation IoU** | **80.98%** | P and B frame motion vector propagation |
-| **Precision @ 0.50** | **98.48%** | Low false-positive rate |
-| **Recall @ 0.50** | **98.73%** | High tracking retention |
-| **F1-Score @ 0.50** | **98.60%** | Balanced tracking performance |
-
-### 2. BiLSTM Action Recognition Model
-Trained on temporal compressed-domain ROI motion features across human activities:
-- **Walking F1-Score**: **85.00%** (Precision: 77.27%, Recall: 94.44%)
-- **Walking While Using Phone F1-Score**: **81.25%** (Precision: 92.86%, Recall: 72.22%)
-- **Standing Still F1-Score**: **68.75%**
-- **Macro Precision**: **69.98%**
-- **Confusion Matrix Plot**: Saved at [`output/action_confusion_matrix.png`](output/action_confusion_matrix.png)
 
 ---
 
@@ -147,56 +115,39 @@ capstone_project/
 ├── batch_process.py                  # Dataset batch runner across video folders with checkpointing
 ├── batch_process_folder.py           # Single-folder dataset tracking pipeline
 ├── render_dataset_videos.py          # Annotated video renderer (bounding boxes, microboxes, MV arrows)
-├── train_and_evaluate_action_model.py# BiLSTM action recognition classifier
-├── evaluate_detector_accuracy.py     # mAP, IoU, precision, and recall evaluation benchmark
-├── print_accuracy_report.py          # Terminal CLI dashboard displaying all benchmark metrics
 ├── debug_extraction.py               # Data extraction verification & troubleshooting script
 ├── upload_release_assets.py          # Automation utility for GitHub Release video uploads
 ├── FFmpeg/                           # Custom FFmpeg source tree with h264_coeff_extract.c hook
-├── output/                           # Results and reports directory
-│   ├── processing_summary.csv        # Master dataset execution logs across all videos
-│   ├── detector_accuracy_report.json # Comprehensive object detection & BAFE tracking benchmarks
-│   ├── action_recognition_metrics.json# Activity classification metrics
-│   └── action_confusion_matrix.png   # Action recognition confusion matrix plot
-└── README.md                         # Unified Project Documentation & Quickstart
+├── output/                           # Results directory
+│   └── processing_summary.csv        # Master dataset execution logs across all videos
+└── README.md                         # Project Documentation & Quickstart
 ```
 
 ---
 
 ## 🚀 Quickstart & Command Guide
 
-### 1. Terminal Accuracy Dashboard
-Display full formatted accuracy report (IoU, mAP, precision, recall, F1):
-```bash
-python print_accuracy_report.py
-```
-
-### 2. Single Video Tracking & P/B Propagation
+### 1. Single Video Tracking & P/B Propagation
 Run compressed-domain tracker on a single video file:
 ```bash
 python compressed_domain_tracker.py --video "Human Activity Recognition - Video Dataset/Walking/Walking (23).mp4" --model "best_model .h5"
 ```
 
-### 3. Batch Tracking on Dataset Folder
+### 2. Batch Tracking on Dataset Folder
 Run BAFE propagation across all dataset video folders:
 ```bash
 python batch_process.py --input "Human Activity Recognition - Video Dataset/Walking" --output "output"
 ```
 
-### 4. Render Visualized Annotated Videos (.mp4)
+### 3. Render Visualized Annotated Videos (.mp4)
 Generate output videos with bounding boxes, macroblocks, and motion vector arrows:
 ```bash
 python render_dataset_videos.py --output "output"
 ```
 
-### 5. Evaluate Tracking Accuracy & IoU Benchmarks
+### 4. Verify P-Frame Extraction & Motion Data
 ```bash
-python evaluate_detector_accuracy.py --annotations "HAR_annotations/Walking" --output "output"
-```
-
-### 6. Train & Evaluate Action Recognition Model
-```bash
-python train_and_evaluate_action_model.py --output "output"
+python debug_extraction.py
 ```
 
 ---
