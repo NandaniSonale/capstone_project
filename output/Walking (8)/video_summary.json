@@ -1,0 +1,17 @@
+{
+  "terminal_prompt": "PS C:\\Users\\newuser\\capstone_project>",
+  "video_name": "Walking (8)",
+  "status": "SUCCESS",
+  "video_path": "C:\\Users\\newuser\\capstone_project\\HAR_annotations\\Walking\\Walking (8).txt",
+  "total_frames": 282,
+  "i_frames": 10,
+  "p_frames": 84,
+  "b_frames": 188,
+  "propagated_frames": 272,
+  "p_propagated": 84,
+  "b_propagated": 188,
+  "tracking_data": "C:\\Users\\newuser\\capstone_project\\output\\Walking (8)\\tracking\\tracking_results.csv",
+  "motion_data": "C:\\Users\\newuser\\capstone_project\\output\\Walking (8)\\motion\\roi_motion_data.json",
+  "error": "",
+  "processing_time": "12.03s"
+}
