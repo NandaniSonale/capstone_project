@@ -1,3 +1,4 @@
+# Author: NandaniSonale
 #!/usr/bin/env python3
 """
 Debug script to verify P-frame motion extraction and ROI filtering.

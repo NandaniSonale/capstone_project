@@ -1,3 +1,4 @@
+# Author: NandaniSonale
 #!/usr/bin/env python3
 """
 Batch Processing Pipeline for Compressed-Domain Video Tracking and Propagation.

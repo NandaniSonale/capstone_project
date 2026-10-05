@@ -1,3 +1,4 @@
+# Author: NandaniSonale
 """
 Box-Aligned Feature Extraction (BAFE) for compressed-domain bbox propagation.
 
