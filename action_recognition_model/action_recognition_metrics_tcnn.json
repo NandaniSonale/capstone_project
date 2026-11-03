@@ -1,0 +1,83 @@
+{
+  "model_architecture": "Temporal Convolutional Network (Temporal 1D-CNN)",
+  "num_classes": 5,
+  "classes": [
+    "Walking",
+    "Clapping",
+    "Sitting",
+    "Standing Still",
+    "Walking While Using Phone"
+  ],
+  "test_metrics": {
+    "test_accuracy": 0.4949,
+    "test_loss": 1.3545,
+    "macro_precision": 0.4265,
+    "macro_recall": 0.4556,
+    "macro_f1_score": 0.3945,
+    "weighted_f1_score": 0.4425
+  },
+  "per_class_metrics": {
+    "Walking": {
+      "precision": 0.96,
+      "recall": 0.8889,
+      "f1_score": 0.9231
+    },
+    "Clapping": {
+      "precision": 0.5,
+      "recall": 0.2222,
+      "f1_score": 0.3077
+    },
+    "Sitting": {
+      "precision": 0.0,
+      "recall": 0.0,
+      "f1_score": 0.0
+    },
+    "Standing Still": {
+      "precision": 0.3636,
+      "recall": 0.2222,
+      "f1_score": 0.2759
+    },
+    "Walking While Using Phone": {
+      "precision": 0.3091,
+      "recall": 0.9444,
+      "f1_score": 0.4658
+    }
+  },
+  "confusion_matrix": [
+    [
+      24,
+      0,
+      0,
+      0,
+      3
+    ],
+    [
+      0,
+      4,
+      0,
+      2,
+      12
+    ],
+    [
+      0,
+      4,
+      0,
+      5,
+      9
+    ],
+    [
+      0,
+      0,
+      0,
+      4,
+      14
+    ],
+    [
+      1,
+      0,
+      0,
+      0,
+      17
+    ]
+  ]
+}
