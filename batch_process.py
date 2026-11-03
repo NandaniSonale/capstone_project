@@ -79,11 +79,15 @@ def is_video_completed(video_out_dir):
     tracking_csv = os.path.join(video_out_dir, "tracking", "tracking_results.csv")
     motion_json = os.path.join(video_out_dir, "motion", "roi_motion_data.json")
 
-    if os.path.exists(summary_path) and os.path.exists(tracking_csv) and os.path.exists(motion_json):
+    vname = os.path.basename(os.path.normpath(video_out_dir))
+    mp4_path = os.path.join(video_out_dir, f"{vname}_visualized.mp4")
+
+    if os.path.exists(summary_path) and os.path.exists(tracking_csv) and os.path.exists(motion_json) and os.path.exists(mp4_path) and os.path.getsize(mp4_path) > 1000:
         try:
             with open(summary_path, 'r') as f:
                 data = json.load(f)
                 if data.get("status") == "SUCCESS":
+                    data["visualized_video"] = mp4_path
                     return True, data
         except Exception:
             return False, None
@@ -374,9 +378,18 @@ def process_annotation_video(ann_path, output_dir, grid_size=7):
             if r[1] == 'B':
                 bw.writerow(r)
 
-    # Write ROI motion data
+    # Write ROI motion data (high-speed buffered stream dump)
     with open(roi_json_path, 'w', encoding='utf-8') as f:
-        json.dump(temporal_roi_data, f, indent=2)
+        f.write('{\n')
+        _items = list(temporal_roi_data.items())
+        for _i, (_k, _mbs) in enumerate(_items):
+            f.write(f'  "{_k}": [\n')
+            for _j, _mb in enumerate(_mbs):
+                _comma = ',' if _j < len(_mbs) - 1 else ''
+                f.write(f'    {{\n      "mb_x": {_mb["mb_x"]},\n      "mb_y": {_mb["mb_y"]},\n      "dx": {_mb["dx"]},\n      "dy": {_mb["dy"]},\n      "dct_energy": {float(_mb["dct_energy"])}\n    }}{_comma}\n')
+            _comma_f = ',' if _i < len(_items) - 1 else ''
+            f.write(f'  ]{_comma_f}\n')
+        f.write('}\n')
 
     # Write motion summary
     with open(os.path.join(motion_dir, "motion_summary.json"), 'w', encoding='utf-8') as f:
@@ -452,6 +465,24 @@ def batch_process(input_dir, output_dir, model_path=None, conf_threshold=0.5,
             print(f"[WARN] Could not load model: {exc}")
 
     summary_records = []
+    if os.path.exists(summary_csv_path):
+        try:
+            with open(summary_csv_path, 'r', encoding='utf-8') as f:
+                reader = csv.DictReader(f)
+                for row in reader:
+                    summary_records.append(row)
+            print(f"[SUMMARY] Loaded {len(summary_records)} existing records from {summary_csv_path}")
+        except Exception:
+            pass
+
+    def _save_or_update_record(records, new_rec):
+        vname = new_rec.get("video_name")
+        for i, r in enumerate(records):
+            if r.get("video_name") == vname:
+                records[i] = new_rec
+                return
+        records.append(new_rec)
+
     total_p_frames = 0
     total_b_frames = 0
     total_propagated = 0
@@ -485,7 +516,7 @@ def batch_process(input_dir, output_dir, model_path=None, conf_threshold=0.5,
             if completed and existing_summary:
                 print(f"  --> [SKIPPED] Already processed. (Use --force to reprocess)")
                 existing_summary["video_name"] = video_name
-                summary_records.append(existing_summary)
+                _save_or_update_record(summary_records, existing_summary)
                 total_p_frames += existing_summary.get("p_frames", 0)
                 total_b_frames += existing_summary.get("b_frames", 0)
                 total_propagated += existing_summary.get("propagated_frames", 0)
@@ -514,9 +545,25 @@ def batch_process(input_dir, output_dir, model_path=None, conf_threshold=0.5,
                     grid_size=grid_size
                 )
 
+            # Auto-render visualized .mp4 video for the video folder
+            try:
+                from render_dataset_videos import render_single_video, find_raw_video_source
+                raw_src = find_raw_video_source(video_name, [
+                    r"Human Activity Recognition - Video Dataset",
+                    os.path.join(r"Human Activity Recognition - Video Dataset", "Sitting"),
+                    r"data/videos",
+                    r"HemaShree_capstone_project/data/videos"
+                ])
+                mp4_out = os.path.join(video_out_dir, f"{video_name}_visualized.mp4")
+                v_res = render_single_video(video_out_dir, raw_video_path=raw_src, output_video_path=mp4_out)
+                res["visualized_video"] = mp4_out
+                print(f"      [RENDER] Visualized video generated: {mp4_out} ({v_res.get('file_size_mb', 0)} MB)")
+            except Exception as v_err:
+                pass
+
             v_duration = time.time() - v_start
 
-            summary_records.append(res)
+            _save_or_update_record(summary_records, res)
             total_p_frames += res.get("p_frames", 0)
             total_b_frames += res.get("b_frames", 0)
             total_propagated += res.get("propagated_frames", 0)
@@ -547,7 +594,7 @@ def batch_process(input_dir, output_dir, model_path=None, conf_threshold=0.5,
                 "error": err_msg,
                 "processing_time": f"{v_duration:.2f}s"
             }
-            summary_records.append(fail_rec)
+            _save_or_update_record(summary_records, fail_rec)
             failed_count += 1
 
         # Incrementally update CSV after every single video

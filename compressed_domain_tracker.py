@@ -98,6 +98,17 @@ class CompressedDomainTracker:
         self.annotation_boxes = self._find_matching_annotation()
         self.frame_index = 0
 
+        self.stats = {
+            "total_frames": 0,
+            "i_frames": 0,
+            "p_frames": 0,
+            "b_frames": 0,
+            "propagated_frames": 0,
+            "p_propagated": 0,
+            "b_propagated": 0,
+            "roi_macroblocks": 0
+        }
+
     def _find_ffmpeg_executable(self):
 
         candidate = os.path.join(

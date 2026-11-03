@@ -1,0 +1,479 @@
+\documentclass[conference]{IEEEtran}
+\IEEEoverridecommandlockouts
+
+\usepackage{cite}
+\usepackage{amsmath,amssymb,amsfonts}
+\usepackage{algorithmic}
+\usepackage{algorithm}
+\usepackage{graphicx}
+\usepackage{textcomp}
+\usepackage{xcolor}
+\usepackage{booktabs}
+\usepackage{array}
+\usepackage{url}
+\usepackage{multirow}
+
+\def\BibTeX{{\rm B\kern-.05em{\sc i\kern-.025em b}\kern-.08em
+    T\kern-.1667em\lower.7ex\hbox{E}\kern-.125emX}}
+
+% Smart figure macro: use real file if it exists, else placeholder box
+\newcommand{\figplaceholder}[2]{\fbox{\parbox[c][#1][c]{0.9\linewidth}{\centering\small #2}}}
+\newcommand{\smartfig}[2]{%
+  \IfFileExists{figures/#1}%
+    {\includegraphics[width=#2]{figures/#1}}%
+    {\figplaceholder{3cm}{Upload figures/#1}}%
+}
+
+\begin{document}
+
+\title{Unified Compressed-Domain Framework for Object Detection\\
+and Human Action Recognition in H.264 Video}
+
+\author{
+\IEEEauthorblockN{Hema Shree R}
+\IEEEauthorblockA{\textit{Dept.\ of CSE, PES University}\\
+PES2UG23CS218}
+\and
+\IEEEauthorblockN{Guru Kiran V}
+\IEEEauthorblockA{\textit{Dept.\ of AIML, PES University}\\
+PES2UG23AM041}
+\and
+\IEEEauthorblockN{Prajwal V}
+\IEEEauthorblockA{\textit{Dept.\ of AIML, PES University}\\
+PES2UG24AM803}
+\and
+\IEEEauthorblockN{Nandani Sonale}
+\IEEEauthorblockA{\textit{Dept.\ of CSE, PES University}\\
+PES2UG23CS364}
+\and
+\IEEEauthorblockN{Dr.\ Kokila}
+\IEEEauthorblockA{\textit{Project Guide, PES University}\\
+Bengaluru, India}
+}
+
+\maketitle
+
+%--------------------------------------------------------------
+\begin{abstract}
+Conventional video analytics pipelines decode compressed streams into RGB frames before running detection, tracking, and action recognition, incurring significant computation, memory, and latency overheads. We present a unified framework that analyses H.264 video largely in the compressed domain, bypassing full pixel decoding. We modify the FFmpeg/libavcodec decoder to export DCT coefficients, motion vectors (MVs), and macroblock energy directly from the bitstream. DCT coefficients of I-frames are grouped into low-, mid-, and high-frequency energy maps, which form a $300\!\times\!300\!\times\!3$ feature tensor used to train a grid-based human detector (\emph{SSD300\_H264}) without RGB decoding. For P- and B-frames we propose \emph{Box-Aligned Feature Extraction} (BAFE), which propagates the detected bounding box using the median MV of macroblocks inside a $3\!\times\!3$ region-of-interest (ROI), avoiding per-frame re-detection. ROI-filtered MVs are then aggregated into an 8-feature temporal sequence and classified by a dilated Temporal Convolutional Network (TCNN) for human action recognition across seven activity classes.
+
+On a held-out test split of 159 frames from 56 videos, the compressed-domain detector reaches 74.15\% precision, 64.12\% recall, and 68.77\% F1 at IoU~0.5. On a continuous 697.7\,s stream of 70 concatenated clips (20{,}931 frames at $1080\!\times\!1920$), the full pipeline runs at 71.6\,FPS, $3.6\!\times$ faster than running YOLOv8n on every frame (20.0\,FPS), while using approximately $390\!\times$ fewer detector FLOPs. The Random Forest action classifier trained with 5-fold cross-validation achieves 79.2\% accuracy (macro-F1 0.792) across all seven classes. Segment-level action accuracy on the 70-segment continuous stream is 52.9\%, revealing that long-stream action recognition remains the primary open challenge.
+\end{abstract}
+
+\begin{IEEEkeywords}
+compressed-domain video analysis, H.264, DCT coefficients, motion vectors, object detection, BAFE, human action recognition, temporal CNN
+\end{IEEEkeywords}
+
+%--------------------------------------------------------------
+\section{Introduction}
+
+Most video analytics pipelines first decode a compressed bitstream into RGB frames and then apply pixel-domain models for detection, tracking, and classification. Full decoding is computationally expensive, memory-intensive, and introduces latency that limits real-time deployment in edge scenarios such as video surveillance, sports analytics, and intelligent transportation~\cite{wang2019fast,wu2020mimic}.
+
+Video codecs such as H.264 already encode rich information useful for analysis. Transform (DCT) coefficients capture the spatial frequency structure of each macroblock, and motion vectors (MVs) represent block-level temporal displacement relative to a reference frame. Exploiting this native information allows significant reduction of both decoding cost and subsequent model inference cost.
+
+Existing compressed-domain methods largely focus either on MV-based tracking~\cite{duche2026see} or on action recognition using pre-decoded optical flow or MV maps~\cite{wu2020mimic,shahabinejad2024adaptive}. Pure MV-based detection, however, misses static or slow-moving objects that produce few informative motion vectors. Our framework addresses this by combining DCT data for detection of both moving and static humans with motion vectors for tracking and action recognition.
+
+\textbf{Contributions.} The main contributions of this work are:
+\begin{itemize}
+  \item A modified FFmpeg/libavcodec pipeline (\texttt{h264\_coeff\_extract.c}) that exports per-macroblock DCT coefficients, motion vectors, and energy metrics directly from H.264 bitstreams without full pixel decoding.
+  \item A three-channel frequency-band feature tensor built from I-frame DCT luma coefficients (low, mid, high frequency bands), used as input to a compressed-domain human detector (\emph{SSD300\_H264}).
+  \item \textbf{BAFE}: a median-MV bounding-box propagation algorithm for P- and B-frames that avoids running a detector on every frame, with a $3\!\times\!3$ box-aligned grid for robust aggregation.
+  \item A temporal action recognition pipeline using ROI-filtered MV sequences classified by a dilated Temporal CNN (TCNN) and a Random Forest ensemble across seven activity classes.
+  \item A comprehensive evaluation on a 1{,}113-video HAR dataset demonstrating a $3.6\!\times$ throughput improvement and $390\!\times$ FLOP reduction over per-frame YOLOv8n.
+\end{itemize}
+
+%--------------------------------------------------------------
+\section{Related Work}
+
+\textbf{Compressed-domain detection and tracking.}
+Duch\'e \emph{et al.}\ study motion-vector-based tracking in compressed video, demonstrating that objects can be followed without pixel decoding~\cite{duche2026see}. Wang \emph{et al.}\ address fast object detection in compressed video, exploiting inter-frame motion context~\cite{wang2019fast}. Honarjoo \emph{et al.}\ detect violence events using compressed-domain cues~\cite{honarjoo2023violence}. A key limitation of pure MV-based methods is that static or slowly moving targets produce sparse, unreliable vectors; our DCT-based detector on I-frames specifically targets this gap.
+
+\textbf{Compressed-domain action recognition.}
+Wu \emph{et al.}\ propose CoViAR, which directly inputs MV maps and residual frames to convolutional networks, mimicking raw-domain optical flow features while operating at compressed-domain speed~\cite{wu2020mimic}. Shahabinejad \emph{et al.}\ extend this with adaptive zooming around motion-active regions using residual-based attention~\cite{shahabinejad2024adaptive}. Our approach differs in that we extract MVs \emph{filtered by the propagated actor ROI}, removing background and camera-motion noise before classification.
+
+\textbf{Object detection architectures.}
+The SSD (Single Shot MultiBox Detector) by Liu \emph{et al.}~\cite{liu2016ssd} provides an efficient single-pass multi-scale detection head that we adapt for the compressed-domain frequency-band input. As an RGB reference we use YOLOv8n~\cite{jocher2023yolov8}, which also served as the annotation oracle to generate pseudo-ground-truth bounding boxes for the training dataset.
+
+%--------------------------------------------------------------
+\section{Proposed Framework}
+
+\subsection{Overview}
+
+The pipeline operates in two stages (Fig.~\ref{fig:overview}).
+\textbf{Stage~1 (Detection):} A modified FFmpeg decoder exports DCT coefficient records for I-frames; these are assembled into a three-channel frequency-band tensor and passed to SSD300\_H264, which outputs a person bounding box in normalised grid coordinates.
+\textbf{Stage~2 (Tracking and Recognition):} For P- and B-frames, BAFE propagates the bounding box from Stage~1 using compressed-domain MVs. MVs inside the updated ROI are aggregated into an 8-dimensional feature vector per frame; a temporal sequence of such vectors is classified by a dilated Temporal CNN or a Random Forest classifier to produce an action label.
+
+\begin{figure}[t]
+\centering
+\smartfig{overview.png}{\linewidth}
+\caption{Overview of the unified compressed-domain framework.
+Stage~1 (top path) processes I-frames; Stage~2 (bottom path) propagates the box across P/B-frames and classifies motion.}
+\label{fig:overview}
+\end{figure}
+
+\subsection{H.264 Bitstream Extraction}
+\label{sec:extraction}
+
+We modify FFmpeg's H.264 decoding loop (\texttt{h264\_coeff\_extract.c}) to intercept two types of data at the macroblock level.
+
+\textbf{I-frame records.} For each macroblock of an I-frame, we write a binary record containing a 20-byte header $[\mathtt{frame\_num},\,\mathtt{mb\_x},\,\mathtt{mb\_y},\,\mathtt{mb\_type},\,\mathtt{cbp}]$ followed by $16\!\times\!48\!\times\!2 = 1{,}536$\,int16 values for quantised luma and chroma DCT coefficients and an additional luma-DC block.
+
+\textbf{P/B-frame records.} For each macroblock of a P- or B-frame, we write a 24-byte record $[\mathtt{pts},\,\mathtt{mb\_x},\,\mathtt{mb\_y},\,\mathtt{dx},\,\mathtt{dy},\,\mathtt{energy}]$, where $(dx, dy)$ is the motion vector in quarter-pixel units and $\mathtt{energy} = \sum_i |c_i|$ is the L1 norm of the residual DCT coefficients. The system assumes $16\!\times\!16$-pixel macroblocks.
+
+\subsection{DCT-Based Feature Map Construction}
+\label{sec:features}
+
+For each I-frame, the luma AC coefficients of every $4\!\times\!4$ sub-block within each macroblock are grouped into three frequency bands by linear index into the $4\!\times\!4$ coefficient array (Fig.~\ref{fig:dct}):
+
+\begin{itemize}
+  \item \textbf{Low frequencies} (indices $\{0,1,4\}$): DC neighbourhood; captures global brightness, structural shape.
+  \item \textbf{Mid frequencies} (indices $\{2,3,5,6,8\}$): intermediate details; captures textures such as hair, skin tone, and clothing patterns.
+  \item \textbf{High frequencies} (indices $\{7,9,10,11,12,13,14,15\}$): fine structure; captures sharp edges and object boundaries.
+\end{itemize}
+
+For each band, the energy is computed as $E = \log(1 + \sum_i c_i^2)$ and stored at the corresponding spatial location in a $(H_{\text{mb}}\!\times\!4)\!\times\!(W_{\text{mb}}\!\times\!4)\!\times\!3$ tensor. H.264 Z-scan ordering maps block index $b$ to a $(r, c)$ position within each macroblock's $4\!\times\!4$ sub-grid using:
+\begin{equation}
+c_b = (b\bmod 2) + \bigl\lfloor (b/4)\bmod 2\bigr\rfloor\!\cdot\!2,\quad
+r_b = \bigl\lfloor (b/2)\bmod 2\bigr\rfloor + \bigl\lfloor b/8\bigr\rfloor\!\cdot\!2.
+\end{equation}
+The three-channel tensor is resized to $300\!\times\!300\!\times\!3$ before inference, where the three channels play the role of R, G, B in a standard image model.
+
+\begin{figure}[t]
+\centering
+\smartfig{dct_maps.png}{\linewidth}
+\caption{H.264 DCT frequency-band decomposition. \emph{Left}: the $4\!\times\!4$ block coefficient index layout with low (blue), mid (orange), and high (red) band assignments. \emph{Centre}: per-band energy maps ($\log\!\left(1+E\right)$ scaled). \emph{Right}: composite $300\!\times\!300\!\times\!3$ feature tensor input to SSD300\_H264.}
+\label{fig:dct}
+\end{figure}
+
+\subsection{Detection Network: SSD300\_H264}
+\label{sec:detector}
+
+The detector (Fig.~\ref{fig:ssd}) takes the $300\!\times\!300\!\times\!3$ DCT tensor as input. The backbone is five successive \texttt{Conv2D($k$, $3\!\times\!3$, ReLU)} + \texttt{MaxPool($2\!\times\!2$)} stages with filter counts $k \in \{32,64,128,256,512\}$, reducing the spatial resolution to $9\!\times\!9$ with 512 feature channels. A fully connected detection head maps the $9\!\times\!9\!\times\!512 = 41{,}472$-dimensional flattened feature vector through \texttt{Dense(1024, ReLU)} and \texttt{Dense(245, Sigmoid)}, which is reshaped to a $7\!\times\!7\!\times\!5$ output grid. Each of the 49 grid cells predicts five values: $[\text{confidence},\, c_x,\, c_y,\, w,\, h]$, where $(c_x, c_y)$ and $(w, h)$ are in normalised grid coordinates $[0, 7]$.
+
+The total number of trainable parameters is 44{,}288{,}053. The model is implemented in TensorFlow/Keras and trained with a custom YOLO-style loss:
+\begin{equation}
+\mathcal{L} = \sum_{i,j}\bigl[(y_{ij,0} - \hat{y}_{ij,0})^2 + y_{ij,0}\!\cdot\!\|\mathbf{y}_{ij,1:5} - \hat{\mathbf{y}}_{ij,1:5}\|^2\bigr],
+\end{equation}
+where the first term is the confidence loss over all cells and the second is the box regression loss weighted by the ground-truth objectness mask. Optimisation uses Adam with learning rate $10^{-3}$, batch size 32, and early stopping (patience 10 epochs); the best validation checkpoint was recovered at epoch 27 out of 50 scheduled epochs (Fig.~\ref{fig:loss}). Ground-truth bounding boxes were generated by running YOLOv8n on RGB frames.
+
+\begin{figure}[t]
+\centering
+\smartfig{ssd300_arch.png}{\linewidth}
+\caption{SSD300\_H264 detection network. Five convolutional backbone stages reduce $300\!\times\!300\!\times\!3$ DCT input to a $9\!\times\!9\!\times\!512$ feature map, followed by fully connected layers and a $7\!\times\!7\!\times\!5$ grid output head.}
+\label{fig:ssd}
+\end{figure}
+
+\subsection{Box-Aligned Feature Extraction (BAFE)}
+\label{sec:bafe}
+
+Detection is run only on I-frames. For every subsequent P- or B-frame, BAFE updates the bounding box using compressed-domain motion information (Fig.~\ref{fig:bafe}, Algorithm~\ref{alg:bafe}).
+
+\textbf{Step 1 — ROI expansion and grid mapping.} The previous frame's box $b_{t-1} = [\mathrm{conf}, c_x, c_y, w, h]$ (in grid coordinates) is expanded by 20\% on each side to define the neighbourhood region. The region is divided into a $3\!\times\!3$ box-aligned grid. Each macroblock is mapped to grid coordinates via:
+\begin{equation}
+g_x = \frac{(\mathtt{mb\_x} + 0.5) \cdot G}{W_{\text{mb}}}, \quad
+g_y = \frac{(\mathtt{mb\_y} + 0.5) \cdot G}{H_{\text{mb}}},
+\end{equation}
+where $G=7$ is the grid size and $W_{\text{mb}},H_{\text{mb}}$ are the number of macroblocks along each dimension.
+
+\textbf{Step 2 — Robust MV aggregation.} For all macroblocks within the expanded ROI, the median MV is computed:
+\begin{equation}
+m_x = \operatorname{median}(\{dx_i\}),\quad m_y = \operatorname{median}(\{dy_i\}).
+\end{equation}
+The median is used instead of the mean to suppress background and outlier MVs. If no non-zero MVs are found in the BAFE grid, the algorithm falls back to all macroblocks strictly inside the box.
+
+\textbf{Step 3 — Unit conversion.} H.264 MVs point from the current block to its reference ($\mathbf{X}_{\text{ref}} - \mathbf{X}_{\text{curr}}$), so the forward displacement of the object is $(-m_x, -m_y)$. Converting from quarter-pixel units to grid space:
+\begin{align}
+\Delta g_x &= -\frac{m_x}{4.0} \cdot \frac{G}{W}, \quad
+\Delta g_y = -\frac{m_y}{4.0} \cdot \frac{G}{H},
+\end{align}
+where $W, H$ are the frame pixel dimensions.
+
+\textbf{Step 4 — Box update.} Only the centre is shifted; width, height, and confidence remain fixed:
+\begin{equation}
+c_x^{\text{new}} = \operatorname{clip}\!\left(c_x + \Delta g_x,\; \tfrac{w}{2},\; G - \tfrac{w}{2}\right),
+\end{equation}
+and analogously for $c_y^{\text{new}}$.
+
+\textbf{Step 5 — ROI filtering.} Macroblocks whose grid-space centre falls inside the updated box are retained; their $(dx, dy, \mathtt{energy})$ values are stored for the action recognition stage.
+
+\begin{algorithm}[t]
+\caption{BAFE bounding-box propagation}
+\label{alg:bafe}
+\begin{algorithmic}[1]
+\REQUIRE I-frame box $b_0 = [\mathrm{conf}, c_x, c_y, w, h]$;\; MV fields $\{M_t\}$ for P/B-frames
+\ENSURE Updated boxes $\{b_t\}$ and ROI-filtered MV sets $\{R_t\}$
+\FOR{each P/B-frame $t$}
+  \STATE Expand $b_{t-1}$ by 20\%; partition into $3\!\times\!3$ grid
+  \STATE Collect $\{(dx_i, dy_i)\}$ from macroblocks in expanded region
+  \STATE $m_x \leftarrow \operatorname{median}(\{dx_i\})$;\; $m_y \leftarrow \operatorname{median}(\{dy_i\})$
+  \STATE Compute $(\Delta g_x, \Delta g_y)$ via quarter-pixel-to-grid conversion
+  \STATE $b_t \leftarrow [\mathrm{conf},\, \operatorname{clip}(c_x + \Delta g_x),\, \operatorname{clip}(c_y + \Delta g_y),\, w, h]$
+  \STATE $R_t \leftarrow$ macroblocks with grid centre inside $b_t$
+\ENDFOR
+\end{algorithmic}
+\end{algorithm}
+
+\begin{figure*}[t]
+\centering
+\smartfig{bafe_flow.png}{\textwidth}
+\caption{BAFE bounding-box propagation flowchart: I-frame detection output, 20\% neighbourhood expansion, $3\!\times\!3$ grid sampling, median MV aggregation, unit conversion, box centre update and clamping, and ROI-filtered macroblock output.}
+\label{fig:bafe}
+\end{figure*}
+
+\subsection{Temporal Action Recognition}
+\label{sec:tcnn}
+
+\subsubsection{Feature Extraction}
+For each frame, the ROI-filtered macroblocks yield a per-frame feature vector of eight motion statistics:
+\begin{equation}
+\mathbf{f}_t = [\bar{dx},\; \bar{dy},\; \sigma_{dx},\; \sigma_{dy},\; \bar{|\mathbf{v}|},\; \bar{E},\; \sigma_E,\; N_{\text{MB}}],
+\end{equation}
+where $\bar{dx}, \bar{dy}$ are mean MV components, $\sigma_{dx}, \sigma_{dy}$ are their standard deviations, $\bar{|\mathbf{v}|}$ is mean magnitude, $\bar{E}, \sigma_E$ are mean and standard deviation of DCT energy, and $N_{\text{MB}}$ is the active macroblock count (normalised). A sequence of up to 60 consecutive frames produces a $60\!\times\!8$ input tensor; shorter sequences are zero-padded and longer sequences are uniformly resampled.
+
+\subsubsection{Temporal CNN Architecture}
+The TCNN (Fig.~\ref{fig:tcnn}) processes the sequence as a $1$D temporal signal. The input is transposed to $(B,\,8,\,60)$ for \texttt{Conv1d} layers. Three sequential blocks are used:
+
+\begin{enumerate}
+  \item \textbf{Block 1}: \texttt{Conv1d(8$\to$64, k=5)} + BatchNorm + ReLU + Dropout(0.3).
+  \item \textbf{Block 2} (dilated residual): \texttt{Conv1d(64$\to$128, k=3, d=1)}, \texttt{Conv1d(128$\to$128, k=3, d=2)}, skip projection \texttt{Conv1d(64$\to$128, k=1)}, residual addition + Dropout(0.3).
+  \item \textbf{Block 3} (deep dilated residual): \texttt{Conv1d(128$\to$256, k=3, d=4)}, \texttt{Conv1d(256$\to$256, k=3, d=1)}, skip projection \texttt{Conv1d(128$\to$256, k=1)}, residual addition + Dropout(0.3).
+\end{enumerate}
+
+Dual global temporal pooling (adaptive average + adaptive max, concatenated to a 512-dim vector) is followed by a classification head: \texttt{FC(512$\to$128)} + BatchNorm + ReLU + Dropout(0.3) + \texttt{FC(128$\to$7)}.
+
+Training uses AdamW ($\text{lr} = 10^{-3}$, weight decay $10^{-4}$), \texttt{ReduceLROnPlateau} (factor 0.5, patience 4), gradient clipping (max norm 1.0), and cross-entropy loss. Splits are 70\% / 15\% / 15\% stratified by video source.
+
+\subsubsection{Random Forest Ensemble}
+As a complementary classifier for the full seven-class scenario, a Random Forest (500 trees, \texttt{min\_samples\_leaf=2}, balanced class weights) is trained on summary statistics of the $60\!\times\!8$ sequence: per-feature mean, standard deviation, and 10th/50th/90th percentiles, yielding a $8\!\times\!5 = 40$-dimensional feature vector per clip. Five-fold stratified cross-validation is used for model selection.
+
+\begin{figure}[t]
+\centering
+\smartfig{tcnn_arch.png}{\linewidth}
+\caption{Temporal CNN architecture for action recognition. Three dilated residual Conv1d blocks process the $60\!\times\!8$ ROI motion sequence; dual global pooling and a fully connected head produce a 7-class prediction.}
+\label{fig:tcnn}
+\end{figure}
+
+%--------------------------------------------------------------
+\section{Design Constraints and Assumptions}
+
+\textbf{Constraints.}
+The system targets H.264 encoded video. It assumes $16\!\times\!16$ macroblocks and requires a custom-patched FFmpeg for bitstream access. Detection runs only on I-frames; subsequent frames rely on BAFE propagation until the next I-frame. The prototype covers the seven HAR activity classes available in the evaluation dataset.
+
+\textbf{Assumptions.}
+(i)~I-frame SSD300\_H264 detection provides a reliable initial bounding box; (ii)~median MV aggregation within a $3\!\times\!3$ ROI grid accurately represents the actor's displacement; (iii)~box dimensions stay approximately constant within one Group-of-Pictures (GOP); (iv)~the YOLO-generated pseudo-labels are of sufficient quality for training the DCT detector.
+
+\textbf{Limitations.}
+Compressed-domain processing requires codec-specific modifications and may not generalise to non-H.264 codecs without re-engineering. MV sparsity in low-motion scenes reduces BAFE reliability. Accumulated drift over long P/B sequences causes detection quality to degrade between I-frames. The current TCNN uses annotation-derived proxy features rather than fully decoded ROI MV maps for some classes, which may limit real-world generalisability.
+
+%--------------------------------------------------------------
+\section{Experimental Evaluation}
+
+\subsection{Dataset and Protocol}
+\label{sec:protocol}
+
+We evaluate the system on the Human Activity Recognition (HAR) Video Dataset, which contains 1{,}113 short clips across seven classes:
+\textit{Clapping}, \textit{Meet and Split}, \textit{Sitting}, \textit{Standing Still}, \textit{Walking}, \textit{Walking While Reading Book}, and \textit{Walking While Using Phone}.
+Clips are H.264 encoded, approximately 8--13\,s long at 30\,fps in $1080\!\times\!1920$ or $1920\!\times\!1080$ resolution. Training annotations (per-frame bounding boxes) were obtained by running YOLOv8n on RGB frames. Per-class annotation counts used for training the action classifier are:
+
+\begin{center}
+\small
+\begin{tabular}{lc}
+\toprule
+Class & Annotations \\
+\midrule
+Walking & 170 \\
+Clapping & 145 \\
+Sitting & 155 \\
+Standing Still & 173 \\
+Walking While Reading Book & 175 \\
+Walking While Using Phone & 142 \\
+Meet and Split & 146 \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\textbf{Detector evaluation.} A held-out test split of 159 frames from 56 videos is used at IoU threshold 0.5 and confidence threshold 0.5.
+
+\textbf{System-level comparison (Experiment~1).} Five clips per class (35 clips total) are processed. Throughput, detector call count, GFLOPs, and per-clip action classification are recorded for three systems:
+\begin{itemize}
+  \item \textbf{Ours}: SSD300\_H264 on I-frames + BAFE propagation + TCNN/RF classifier.
+  \item \textbf{YOLOv8-FULL}: YOLOv8n on every decoded frame.
+  \item \textbf{YOLOv8-KEY}: YOLOv8n on I-frames only with MV-based box propagation.
+\end{itemize}
+
+\textbf{Long-stream evaluation (Experiment~2).} Ten clips per class are concatenated into one continuous $1080\!\times\!1920$, 30\,fps stream of 70 segments (20{,}931 frames, 697.7\,s total). A segment-boundary manifest assigns one action label per source clip; the system must predict the correct label for each segment from the continuous stream.
+
+\textbf{Hardware.} All experiments ran on Windows 10 with a 32-logical-core Intel CPU, 127.7\,GB RAM, and an NVIDIA RTX~4500 Ada GPU (24\,GB). YOLOv8n and the TCNN ran on CUDA (PyTorch 2.6.0+cu124). The TensorFlow SSD300\_H264 detector ran on CPU (TensorFlow 2.21.0), so its wall-clock inference time is not GPU-equivalent and the speed comparison between our detector and YOLOv8n should be interpreted primarily through the FLOP lens.
+
+\subsection{Detector Performance}
+
+Table~\ref{tab:det} compares SSD300\_H264 with YOLOv8n on the held-out test split. Training converged with early stopping at epoch 37; the best validation checkpoint at epoch 27 was restored (Fig.~\ref{fig:loss}). Note that YOLOv8n was also the annotation oracle, making it an \emph{upper-bound reference} rather than an independent baseline; its near-perfect scores reflect consistency with its own pseudo-labels.
+
+\begin{table}[t]
+\caption{Detection results on the held-out test split (159 frames, 56 videos; IoU 0.5, confidence 0.5).}
+\label{tab:det}
+\centering
+\begin{tabular}{lcc}
+\toprule
+Metric & SSD300\_H264 (ours) & YOLOv8n (RGB) \\
+\midrule
+Input modality    & DCT features       & RGB frames \\
+Parameters        & 44,288,053         & 3,157,200  \\
+GFLOPs/inference  & 3.47               & 8.74       \\
+True positives    & 109                & 177        \\
+False positives   & 38                 & 2          \\
+False negatives   & 61                 & 0          \\
+Precision (\%)    & 74.15              & 98.88      \\
+Recall (\%)       & 64.12              & 100.00     \\
+F1-score (\%)     & 68.77              & 99.44      \\
+Eval.\ time (s)   & 3.61 (CPU)         & 52.46 (GPU)\\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{figure}[t]
+\centering
+\smartfig{training_curve.png}{\linewidth}
+\caption{SSD300\_H264 training and validation loss. Early stopping fires at epoch 37; best weights from epoch 27 are restored.}
+\label{fig:loss}
+\end{figure}
+
+The compressed-domain detector achieves 74.15\% precision without RGB decoding. False positives arise mainly when DCT energy distributions overlap between person and non-person regions (e.g., complex backgrounds); false negatives occur for small or partially occluded persons whose DCT signature is attenuated by the lossy quantisation of the codec. Despite these limitations, the model operates at 3.47\,GFLOPs/inference vs.\ 8.74\,GFLOPs for YOLOv8n, and because BAFE reduces detector calls to only I-frames, the system-level FLOP count is drastically lower.
+
+\subsection{System-Level Efficiency}
+
+Table~\ref{tab:long} reports results for the 70-clip long-duration stream. Our pipeline processes 20{,}931 frames in 292.45\,s (71.6\,FPS), which is $3.6\!\times$ faster than YOLOv8-FULL (20.0\,FPS) and uses approximately $390\!\times$ fewer detector FLOPs (468.7\,GFLOPs vs.\ 183{,}020.4\,GFLOPs). Both keyframe-only systems make the same 135 detector calls (one per I-frame in 70 clips).
+
+YOLOv8-KEY is faster in wall-clock time (105.8\,FPS) because it uses a GPU-accelerated detector, whereas our SSD300\_H264 ran on CPU. The FLOP comparison is therefore the fairer metric: our detector uses $1{,}180.4 / 468.7 = 2.5\!\times$ fewer GFLOPs than YOLOv8-KEY. Note also that our pipeline includes the full action recognition stage (TCNN inference), whereas the YOLOv8-KEY timing includes only detection and propagation.
+
+\begin{table}[t]
+\caption{Long-stream results: 70 clips, 20{,}931 frames, 697.7\,s. GFLOPs are detector-only; speed-up is relative to YOLOv8-FULL.}
+\label{tab:long}
+\centering
+\footnotesize
+\begin{tabular}{lrrrr}
+\toprule
+Method & Time (s) & FPS & GFLOPs & Speed-up \\
+\midrule
+Ours          & 292.45   & 71.6  & 468.7      & $3.6\!\times$ \\
+YOLOv8-KEY    & 197.90   & 105.8 & 1{,}180.4  & $5.3\!\times$ \\
+YOLOv8-FULL   & 1{,}046.74 & 20.0 & 183{,}020.4 & $1.0\!\times$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Detection and Tracking Quality}
+
+On Clapping clips~(3)--(5), which have independently verified annotations, the compressed-domain pipeline obtains F1 scores of 0.896, 0.998, and 1.000 with mean IoU of 0.614--0.812, compared with 0.971, 0.998, and 1.000 (mean IoU 0.584--0.912) for YOLOv8n. The results are close on clips where the I-frame detector succeeds, confirming that BAFE propagation maintains tracking quality across the GOP.
+
+For clips without independent annotations, agreement with YOLOv8n (used as pseudo-reference) ranges from F1~0.309 to 1.000 and mean IoU 0.587 to 0.786. Agreement degrades for scenes with multiple people or rapid camera motion, where background MVs corrupt the median estimate.
+
+\subsection{Action Recognition}
+
+\textbf{Temporal CNN (5-class model).}
+The Bi-LSTM model trained on 5 classes (Walking, Clapping, Sitting, Standing Still, Walking While Using Phone) achieves 74.34\% test accuracy and macro-F1 of 0.697 (Table~\ref{tab:ar5}). Walking is the best-recognised class (F1~0.907, recall 0.951), while Clapping and Sitting are most often confused with each other (F1 $\approx 0.57$--0.59).
+
+\begin{table}[t]
+\caption{5-class Bi-LSTM action recognition on held-out test set (15\% split).}
+\label{tab:ar5}
+\centering
+\small
+\begin{tabular}{lccc}
+\toprule
+Class & Prec.\ (\%) & Rec.\ (\%) & F1 (\%) \\
+\midrule
+Walking                   & 86.67 & 95.12 & 90.70 \\
+Clapping                  & 58.82 & 55.56 & 57.14 \\
+Sitting                   & 57.89 & 61.11 & 59.46 \\
+Standing Still            & 80.00 & 66.67 & 72.73 \\
+Walking While Using Phone & 70.59 & 66.67 & 68.57 \\
+\midrule
+\textbf{Macro average}    & \textbf{70.79} & \textbf{69.02} & \textbf{69.72} \\
+\textbf{Overall accuracy} & \multicolumn{3}{c}{\textbf{74.34\%}} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\textbf{Random Forest (7-class model).}
+The Random Forest classifier trained on all seven classes achieves 79.2\% 5-fold cross-validation accuracy (macro-F1 0.792, std $\pm$0.028). Per-class cross-validation results are summarised in Table~\ref{tab:ar7}. Meet and Split is the best-recognised class (F1~0.990), while Clapping and Sitting are most often confused (F1 $\approx 0.655$--0.698), likely because both classes involve periodic upper-body motion at similar body positions.
+
+\begin{table}[t]
+\caption{7-class Random Forest out-of-fold cross-validation metrics (5-fold stratified; 1,106 annotation sequences).}
+\label{tab:ar7}
+\centering
+\small
+\begin{tabular}{lcccc}
+\toprule
+Class & Prec.\ (\%) & Rec.\ (\%) & F1 (\%) & Support \\
+\midrule
+Walking                       & 82.00 & 72.35 & 76.88 & 170 \\
+Clapping                      & 64.86 & 66.21 & 65.53 & 145 \\
+Sitting                       & 68.75 & 70.97 & 69.84 & 155 \\
+Standing Still                & 72.84 & 68.21 & 70.45 & 173 \\
+Walking While Reading Book    & 85.71 & 92.57 & 89.01 & 175 \\
+Walking While Using Phone     & 81.33 & 85.92 & 83.56 & 142 \\
+Meet and Split                & 98.64 & 99.32 & 98.97 & 146 \\
+\midrule
+\textbf{Macro average}        & \textbf{79.16} & \textbf{79.36} & \textbf{79.17} & 1{,}106 \\
+\textbf{CV accuracy}          & \multicolumn{4}{c}{\textbf{79.20\%} $\pm$ 2.81\%} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\textbf{Long-stream performance (Experiment~2).}
+On the continuous 70-segment stream, segment-level accuracy drops to 37 of 70 segments (52.9\%). Confusions arise primarily between visually and kinematically similar classes: Meet and Split segments are occasionally predicted as Walking While Using Phone (e.g., 44\% confidence), and Walking While Reading Book is sometimes predicted as Walking While Using Phone (85\% confidence). Fig.~\ref{fig:cm} shows the confusion matrix.
+
+\begin{figure}[t]
+\centering
+\smartfig{action_cm.png}{\linewidth}
+\caption{Confusion matrix for the 5-class Bi-LSTM action recogniser on the test split. Walking is the best-separated class; Clapping and Sitting exhibit mutual confusion.}
+\label{fig:cm}
+\end{figure}
+
+The drop from per-clip accuracy ($\approx$74--79\%) to long-stream accuracy (52.9\%) is caused by two factors. First, in the long stream, the BAFE box can drift substantially before the next I-frame resets it, causing ROI MVs to include background or a wrong person. Second, the action classifier receives a window of frames that may span a segment boundary, mixing features from two different activities.
+
+%--------------------------------------------------------------
+\section{Discussion}
+
+The experiments demonstrate where the compressed-domain framework excels and where limitations remain.
+
+\textbf{Efficiency gains.} Running the detector only on I-frames reduces GFLOPs by approximately $390\!\times$ relative to per-frame YOLOv8n on the long stream, and achieves a $3.6\!\times$ wall-clock speed-up. Even accounting for the CPU/GPU asymmetry in the current prototype, the FLOP reduction directly translates to reduced energy consumption in an edge deployment scenario where both models would run on the same hardware.
+
+\textbf{Detection accuracy.} The SSD300\_H264 detector (74.15\% precision, 64.12\% recall) is weaker than the RGB YOLOv8n reference (98.88\%, 100\%) on the pseudo-labelled test set. The gap arises partly from domain mismatch (DCT energy maps capture frequency structure rather than semantic appearance), partly from the smaller effective resolution of the feature tensor after codec quantisation, and partly from the shallower backbone. The closest existing work on MV-based methods~\cite{duche2026see} does not address static people; our DCT approach makes a step forward for that case.
+
+\textbf{Action recognition.} The Random Forest achieves 79.2\% cross-validation accuracy across seven classes, which is competitive for compressed-domain features. The most challenging classes (Clapping, Sitting, Standing Still) share similar overall body-position features and differ mainly in upper-limb kinematics, which are poorly captured by macro-block-level MVs. The drop to 52.9\% in the long continuous stream highlights the need for re-initialisation logic (e.g., re-detecting at each new I-frame boundary) and temporal windowing that respects segment boundaries.
+
+\textbf{Failure modes.} (i)~BAFE drift: accumulated box-position error over many P/B-frames can cause the ROI to slide off the person, especially in fast-motion scenes. (ii)~Multi-person scenes: the system currently detects only one person per frame; crowded scenes with multiple moving people cause the BAFE median MV to be corrupted by background motion. (iii)~Low-motion classes: Standing Still and Sitting produce very few non-zero MVs, making the action features nearly indistinguishable and increasing confusion rates.
+
+%--------------------------------------------------------------
+\section{Conclusion and Future Work}
+
+We presented a unified compressed-domain framework for H.264 video that extracts DCT coefficients and motion vectors directly from the bitstream to perform human detection, bounding-box propagation (BAFE), and action recognition without full pixel decoding. The DCT-based SSD300\_H264 detector achieves 74.15\% precision and 64.12\% recall on a held-out test split. On a 697.7\,s continuous stream the full pipeline runs at 71.6\,FPS — $3.6\!\times$ faster than per-frame YOLOv8n — with approximately $390\!\times$ fewer detector FLOPs. The Random Forest action classifier achieves 79.2\% 5-fold cross-validation accuracy across seven HAR classes, while segment-level accuracy on the long continuous stream is 52.9\%.
+
+Future work will focus on: (i)~improving detector accuracy through larger, more diverse training data and a backbone pre-trained on compressed-domain features; (ii)~reducing BAFE drift via re-initialisation at each I-frame and confidence-weighted propagation; (iii)~multi-person tracking in compressed domain; (iv)~replacing proxy annotation-derived features with fully end-to-end extracted ROI MV sequences; and (v)~deploying the pipeline on live RTSP camera streams for real-time surveillance applications.
+
+%--------------------------------------------------------------
+\begin{thebibliography}{00}
+\bibitem{duche2026see}
+D.~A.~Duch\'e, C.~Chatelain, and G.~Gasso, ``See Without Decoding: Motion-Vector-Based Tracking in Compressed Video,'' INSA Rouen, LITIS UR 4108, France, 2026.
+
+\bibitem{wang2019fast}
+S.~Wang, H.~Lu, and Z.~Deng, ``Fast Object Detection in Compressed Video,'' \emph{Proc.\ IEEE Int.\ Conf.\ Computer Vision (ICCV)}, Tsinghua University / Alibaba Group, 2019.
+
+\bibitem{wu2020mimic}
+Z.~Wu, W.~Zhu, Y.~Xu, G.~Chi, and L.~Lin, ``Mimic the Raw Domain: Accelerating Action Recognition in the Compressed Domain,'' \emph{arXiv preprint arXiv:2010.12051}, 2020.
+
+\bibitem{shahabinejad2024adaptive}
+M.~Shahabinejad, ``Video Action Recognition with Adaptive Zooming Using Motion Residuals,'' \emph{arXiv preprint}, 2024.
+
+\bibitem{honarjoo2023violence}
+N.~Honarjoo, A.~Abdari, and A.~Mansouri, ``Violence Detection in Compressed Video,'' \emph{Multimed.\ Tools Appl.}, 2023.
+
+\bibitem{liu2016ssd}
+W.~Liu, D.~Anguelov, D.~Erhan, C.~Szegedy, S.~Reed, C.-Y.~Fu, and A.~C.~Berg, ``SSD: Single Shot MultiBox Detector,'' in \emph{Proc.\ Eur.\ Conf.\ Computer Vision (ECCV)}, 2016, pp.~21--37.
+
+\bibitem{jocher2023yolov8}
+G.~Jocher, A.~Chaurasia, and J.~Qiu, ``Ultralytics YOLOv8,'' 2023. [Online]. Available: \url{https://github.com/ultralytics/ultralytics}
+\end{thebibliography}
+
+\end{document}

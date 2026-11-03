@@ -107,6 +107,7 @@ def render_single_video(
     if not writer.isOpened():
         raise RuntimeError(f"Failed to open VideoWriter for {output_video_path}")
 
+    scale_x = width / 1920.0
     grid_w = max(int(16 * scale_x), 4)
 
     for idx, (pts_value, frame_rows) in enumerate(frame_groups):
@@ -243,7 +244,7 @@ def render_single_video(
 def main():
     parser = argparse.ArgumentParser(description="Render visual videos with bounding boxes and microboxes.")
     parser.add_argument("--output", "-o", default="output", help="Directory containing per-video output folders")
-    parser.add_argument("--raw-videos", "-r", default=r"C:\Users\keshav\OneDrive\Desktop\nandani", help="Directory with raw video files if any")
+    parser.add_argument("--raw-videos", "-r", default=r"Human Activity Recognition - Video Dataset", help="Directory with raw video files if any")
     parser.add_argument("--width", type=int, default=540, help="Output video width (default: 540)")
     parser.add_argument("--height", type=int, default=960, help="Output video height (default: 960)")
     parser.add_argument("--fps", type=int, default=25, help="Output video FPS (default: 25)")
