@@ -1,6 +1,0 @@
-# Normalise line endings of text files in the repository
-* text=auto
-*.patch -text
-*.dll binary
-*.docx binary
-*.png binary
