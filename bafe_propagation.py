@@ -9,7 +9,6 @@ median motion to update box position on P-frames.
 
 import numpy as np
 
-
 def mb_to_grid(mb_x, mb_y, num_mb_x, num_mb_y, grid_size):
     return (
         (mb_x + 0.5) * grid_size / num_mb_x,
